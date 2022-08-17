@@ -69,3 +69,40 @@ class Cifar10_CNN(torch.nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+    def description(self):
+        return """torch.nn.Sequential(
+    MyConv2d(3, 32, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(32),
+    MyConv2d(32, 32, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(32),
+    torch.nn.MaxPool2d(kernel_size=2),
+    torch.nn.Dropout(0.3),
+
+    MyConv2d(32, 64, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(64),
+    MyConv2d(64, 64, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(64),
+    torch.nn.MaxPool2d(kernel_size=2),
+    torch.nn.Dropout(0.5),
+
+    MyConv2d(64, 128, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(128),
+    MyConv2d(128, 128, padding="same", kernel_size=3),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm2d(128),
+    torch.nn.MaxPool2d(kernel_size=2),
+    torch.nn.Dropout(0.5),
+
+    torch.nn.Flatten(),
+    torch.nn.Linear(4*4*128, 128),
+    torch.nn.ReLU(),
+    torch.nn.BatchNorm1d(128),
+    torch.nn.Dropout(0.5),
+    torch.nn.Linear(128, 10)
+)"""

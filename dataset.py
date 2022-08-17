@@ -1,17 +1,23 @@
 import torch
+import torchvision
+from torchvision import transforms
 
-class DatasetMerger(torch.utils.data.Dataset):
+class ETDataset(torch.utils.data.Dataset):
     """Class that implements a dataset that is able to merge more datasets in one in a transparent way."""
     
-    def __init__(self, datasets_list, set_labels_from=None, input_preprocessing_function=None, output_preprocessing_function=None, dataloader_args=None):
+    def __init__(self, datasets_list, set_labels_from=None, input_preprocessing_function=None, output_preprocessing_function=None):
         """Initialize the dataset.
         Args:
             datasets_list: an iterable of datasets: the datasets that we want to merge.
             set_labels_from: an instance of this class, that is used to create the labels in a consistent way; if None, the labels are set automatically.
             dataloader_args: dictionary of arguments to be given to the dataloader (if None, no dataloader is used)
         """
+        
+        if isinstance(datasets_list, list) or isinstance(datasets_list, tuple):
+            self.datasets_list = list(datasets_list)
+        else:
+            self.datasets_list = [datasets_list]
 
-        self.datasets_list = list(datasets_list)
         self.class_map = {} # to map the label unique identifier with the couple (dataset_id, label_within_the_dataset)
         self.reverse_class_map = {}
         data_indexes_list = []
@@ -36,7 +42,10 @@ class DatasetMerger(torch.utils.data.Dataset):
             
             # extract the labels of each dataset and give them a unique id
             if set_labels_from is None:
-                self.class_map.update({(dataset_index, x.item()): x.item() + len(self.class_map) for x in torch.unique(torch.LongTensor(dataset.targets), sorted=True)})
+                self.class_map.update({
+                    (dataset_index, x.item()): x.item() + len(self.class_map)
+                    for x in torch.unique(torch.LongTensor(dataset.targets), sorted=True)
+                })
         
         # concatenating the tables of each dataset
         self.data_indexes = torch.cat(data_indexes_list, dim=1).transpose(0, 1)
@@ -44,9 +53,12 @@ class DatasetMerger(torch.utils.data.Dataset):
         self.reverse_class_map = {self.class_map[x]: x for x in self.class_map}
         self.num_classes = len(self.class_map)
 
-        self.input_preprocessing_function = input_preprocessing_function
-        self.output_preprocessing_function = output_preprocessing_function
-        self.dataloader_args = dataloader_args
+        self.input_preprocessing_function = (
+            input_preprocessing_function if input_preprocessing_function != None else lambda x: x
+        )
+        self.output_preprocessing_function = (
+            output_preprocessing_function if output_preprocessing_function != None else lambda x: x
+        )
 
     def get_raw_item(self, index):
         """Get an example from the dataset, without applying the preprocessing function.
@@ -67,13 +79,8 @@ class DatasetMerger(torch.utils.data.Dataset):
         return data, label
 
     def preprocess(self, data, label):
-        processed_data = (self.input_preprocessing_function(data)
-            if self.input_preprocessing_function != None
-            else data)
-
-        processed_label = (self.output_preprocessing_function(label)
-            if self.output_preprocessing_function != None
-            else label)
+        processed_data = self.input_preprocessing_function(data)
+        processed_label = self.output_preprocessing_function(label)
 
         return processed_data, processed_label
 
@@ -92,11 +99,14 @@ class DatasetMerger(torch.utils.data.Dataset):
 
         return self.data_indexes.shape[0]
 
-    def shuffle(self):
+    def shuffle(self, groups=None):
         """Shuffle the examples of the dataset, mixing togeher examples of different datasets."""
 
-        indexes = torch.randperm(self.data_indexes.shape[0])
-        self.data_indexes = self.data_indexes[indexes]
+        if groups == None:
+            indexes = torch.randperm(self.data_indexes.shape[0])
+            self.data_indexes = self.data_indexes[indexes]
+        else:
+            raise NotImplementedError
 
     def dataset_wise_sort_by_label(self):
         """Sort the dataset by target class id."""
@@ -120,6 +130,3 @@ class DatasetMerger(torch.utils.data.Dataset):
         # concatenating the tables of each dataset
         self.data_indexes = torch.cat(data_indexes_list, axis=1).transpose(0, 1)
 
-    def dataset(self):
-        return (self if self.dataloader_args == None else
-            torch.utils.data.DataLoader(self, **self.dataloader_args))
