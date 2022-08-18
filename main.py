@@ -4,7 +4,7 @@ from torchvision import transforms
 
 import model as md
 import dataset as ds
-import training_algorithm as ta
+import algorithm as ta
 import experiment as ex
 
 transform_cifar10 = transforms.Compose([transforms.ToTensor()])
@@ -45,7 +45,7 @@ my_training_set = ds.ETDataset(train_set_cifar10)
 my_test_set = ds.ETDataset(test_set_cifar10)
 
 training_function_args = dict(
-    epoch_number=10,
+    epoch_number=2,
     optimizer="adam",
     lr=0.001,
     weight_decay=0,
@@ -55,12 +55,21 @@ training_function_args = dict(
     dataloader_args={"num_workers": 4}
 )
 
-my_training_algorithm = ta.ETTraining_algorithm(ta.train, training_function_args)
+my_training_algorithm = ta.ETAlgorithm(ta.train, training_function_args)
 
-experiment = ex.Experiment("prova", my_model, my_training_set, my_test_set, my_training_algorithm)
+my_pipeline = my_training_algorithm
+
+experiment = ex.ETExperiment("prova", my_model, my_training_set, my_test_set, my_pipeline)
+
 experiment.run()
 
-device = torch.device("cuda:0")
+"""
+Algoritmi:
+    - training mini-batch (che può diventare benissimo batch, mini-batch, online)
+    - test accuratezza
+    - sort dataset
+    - 
+"""
 
 
 # cifar10_cnn = cifar10_cnn.to(device)

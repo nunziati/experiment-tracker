@@ -1,16 +1,43 @@
 import torch
+from collections.abc import Iterable
 
-class ETTraining_algorithm:
+from experiment import ETExperiment
+
+class ETAlgorithm:
     def __init__(self, training_function, training_function_args=None):
         self.training_function = training_function
         self.training_function_args = training_function_args
 
-    def __call__(self, model, data):
-        return self.training_function(model, data, **self.training_function_args)
+    def __call__(self, experiment):
+        return self.training_function(experiment, **self.training_function_args)
+
+class ETPipeline:
+    def __init__(self, pipeline, name):
+        if not isinstance(pipeline, Iterable):
+            raise TypeError("The pipeline should be an iterator of ETAlgorithm/ETPipeline.")
+        if not isinstance(name, str):
+            raise TypeError("The name of the pipeline should be a str.")
+
+        self.pipeline = list()
+        for algorithm in pipeline:
+            if not isinstance(algorithm, ETAlgorithm) and not isinstance(algorithm, ETPipeline):
+                raise TypeError("The pipeline should be an iterator of ETAlgorithm/ETPipeline.")
+            self.pipeline.append(algorithm)
+
+        self.name = name
+    
+    def __call__(self, experiment):
+        if not isinstance(experiment, ETExperiment):
+            raise TypeError("The argument 'experiment' should be an instance of ETExperiment.")
+
+        pipeline_results = {self.name: {}}
+        for algorithm in self.pipeline:
+            pipeline_results[self.name].update(algorithm(experiment))
+
+        return pipeline_results
 
 def train(
-    input_model,
-    data,
+    experiment,
     epoch_number=1,
     optimizer="adam",
     lr=0.01,
@@ -28,8 +55,10 @@ def train(
         lr: learning rate.
         weight_decay: weight multiplying the weight decay regularizaion term.
     """
+
+    data = experiment.training_set
     
-    model = input_model.to(torch.device(device))
+    model = experiment.model.to(torch.device(device))
 
     num_examples = len(data)
 
@@ -101,4 +130,4 @@ Dataloader args: {dataloader_args}
     # recover the initial train/eval mode
     if not training: model.eval()
 
-    return model, training_log
+    return dict(training_log = training_log, trained_model = model) 

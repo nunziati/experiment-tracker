@@ -106,6 +106,7 @@ class ETDataset(torch.utils.data.Dataset):
             indexes = torch.randperm(self.data_indexes.shape[0])
             self.data_indexes = self.data_indexes[indexes]
         else:
+            # Idea: shuffle only within groups of labels
             raise NotImplementedError
 
     def dataset_wise_sort_by_label(self):
