@@ -74,6 +74,8 @@ class ETExperiment:
                 os.chdir(k)
                 self.save_results_recursive(v)
                 os.chdir(current_dir)
+            else:
+                with open(k + ".txt", "a+") as f: f.write(str(v))
 
     def run(self):
         if not self.ready():

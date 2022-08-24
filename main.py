@@ -14,30 +14,6 @@ test_set_cifar10 = torchvision.datasets.CIFAR10(root='./data', train=False, down
 
 test_set_loader = torch.utils.data.DataLoader(test_set_cifar10, batch_size=8, shuffle=False, num_workers=4)
 
-def evaluate(model, data, device):
-    # save the train/eval mode of the network and change it to training mode
-    training = model.training
-    model.eval()
-
-    acc = 0
-    for img_mini_batch, label_mini_batch in data:
-         # send the mini-batch to the device memory
-        img_mini_batch = img_mini_batch.to(device)
-        label_mini_batch = label_mini_batch.to(device)
-        
-        logits = model(img_mini_batch)
-        predicted_labels = torch.argmax(logits, dim=1)
-        acc += torch.sum(torch.eq(predicted_labels, label_mini_batch))
-    
-    print(acc)
-    print(len(data))
-    acc /= len(data)
-
-    # recover the initial train/eval mode
-    if training: model.train()
-
-    return acc
-
 my_model = md.Cifar10_CNN()
 
 my_training_set = ds.ETDataset(train_set_cifar10)
@@ -46,7 +22,8 @@ my_test_set = ds.ETDataset(test_set_cifar10)
 
 training_function_args = dict(
     epoch_number=2,
-    optimizer="adam",
+    loss_function_name="cross_entropy_loss",
+    optimizer_name="adam",
     lr=0.001,
     weight_decay=0,
     batch_size=64,
@@ -57,7 +34,17 @@ training_function_args = dict(
 
 my_training_algorithm = ta.ETAlgorithm(ta.train, training_function_args)
 
-my_pipeline = my_training_algorithm
+test_function_args = dict(
+    metrics="accuracy",
+    batch_size=None,
+    shuffle=True,
+    device="cuda:0",
+    dataloader_args={"num_workers": 4}
+)
+
+my_test_algorithm = ta.ETAlgorithm(ta.evaluate, test_function_args)
+
+my_pipeline = ta.ETPipeline("holdout", [my_training_algorithm, my_test_algorithm])
 
 experiment = ex.ETExperiment("prova", my_model, my_training_set, my_test_set, my_pipeline)
 
