@@ -21,18 +21,21 @@ my_training_set = ds.ETDataset(train_set_cifar10)
 my_test_set = ds.ETDataset(test_set_cifar10)
 
 training_function_args = dict(
-    epoch_number=2,
+    epoch_number=1,
     loss_function_name="cross_entropy_loss",
     optimizer_name="adam",
-    lr=0.001,
-    weight_decay=0,
+    optimizer_args = dict(
+        lr=0.001,
+        weight_decay=0
+    ),
     batch_size=64,
-    shuffle=True,
-    device="cuda:0",
-    dataloader_args={"num_workers": 4}
+    device="cpu",
+    dataloader_args=dict(
+        num_workers=4
+    )
 )
 
-my_training_algorithm = ta.ETAlgorithm(ta.train, training_function_args)
+my_training_algorithm = ta.ETAlgorithm(ta.task_incremental_train, training_function_args)
 
 test_function_args = dict(
     metrics="accuracy",
@@ -42,11 +45,11 @@ test_function_args = dict(
     dataloader_args={"num_workers": 4}
 )
 
-my_test_algorithm = ta.ETAlgorithm(ta.evaluate, test_function_args)
+# my_test_algorithm = ta.ETAlgorithm(ta.evaluate, test_function_args)
 
-my_pipeline = ta.ETPipeline("holdout", [my_training_algorithm, my_test_algorithm])
+# my_pipeline = ta.ETPipeline("holdout", [my_training_algorithm, my_test_algorithm])
 
-experiment = ex.ETExperiment("prova", my_model, my_training_set, my_test_set, my_pipeline)
+experiment = ex.ETExperiment("prova", my_model, my_training_set, my_test_set, my_training_algorithm)
 
 experiment.run()
 

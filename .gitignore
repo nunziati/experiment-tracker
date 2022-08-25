@@ -131,3 +131,4 @@ dmypy.json
 # specific of this project
 experiments/
 data/
+TODO.txt

@@ -61,6 +61,8 @@ class ETExperiment:
                 v.savefig(k + ".jpg")
             elif isinstance(v, torch.nn.Module):
                 torch.save(v.state_dict(), k + ".pth")
+            elif isinstance(v, torch.Tensor):
+                torch.save(v, k + ".pth")
             elif isinstance(v, dict):
                 current_dir = os.getcwd()
                 if os.path.isdir(k):

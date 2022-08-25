@@ -1,6 +1,6 @@
 import torch
 from collections.abc import Iterable
-
+import matplotlib.pyplot as plt
 from experiment import ETExperiment
 
 loss_functions = dict(
@@ -50,8 +50,7 @@ def train(
     epoch_number=1,
     loss_function_name="cross_entropy_loss",
     optimizer_name="adam",
-    lr=0.01,
-    weight_decay=0,
+    optimizer_args={},
     batch_size=None,
     shuffle=True,
     device="cpu",
@@ -90,7 +89,7 @@ def train(
 
     # create the optimizer selected by the caller of the function
     if optimizer_name in optimizers:
-        optimizer = optimizers[optimizer_name](experiment.model.parameters(), lr, weight_decay=weight_decay)
+        optimizer = optimizers[optimizer_name](experiment.model.parameters(), **optimizer_args)
     else:
         raise ValueError(f'Optimizer "{optimizer_name}" not defined.')
     
@@ -98,8 +97,7 @@ def train(
 Epochs: {epoch_number}
 Loss function: {loss_function_name}
 Optimizer: {optimizer_name}
-Learning rate: {lr}
-Weight decay: {weight_decay}
+Optimizer args: {optimizer_args}
 Batch size: {batch_size},
 Shuffle: {shuffle},
 Device: {device},
@@ -192,13 +190,117 @@ Dataloader args: {dataloader_args}
 
     return dict(accuracy = accuracy.item())
 
-def classwise_train(
+def task_incremental_train(
     experiment,
     epoch_number=1,
     loss_function_name="cross_entropy_loss",
     optimizer_name="adam",
-    lr=0.01,
-    weight_decay=0,
+    optimizer_args={},
+    device="cpu",
+    batch_size=1,
+    dataloader_args=None,
+    evaluate=True
+):
+    data = experiment.training_set
+    num_classes = data.num_classes
+
+    model = experiment.model.to(torch.device(device))
+
+    num_examples = len(data)
+
+    batch_size = 1 if batch_size == None else batch_size
+
+    for parameter in model.parameters():
+        torch.nn.init.uniform_(parameter, -0.1, 0.1)
+
+    # save the train/eval mode of the network and change it to training mode
+    training = model.training
+    model.train()
+
+    # select loss function
+    if loss_function_name in loss_functions:
+        loss_function = loss_functions[loss_function_name]()
+    else:
+        raise ValueError(f'Loss function "{loss_function_name}" not defined.')
+
+    # create the optimizer selected by the caller of the function
+    if optimizer_name in optimizers:
+        optimizer = optimizers[optimizer_name](experiment.model.parameters(), **optimizer_args)
+    else:
+        raise ValueError(f'Optimizer "{optimizer_name}" not defined.')
+    
+    training_log = f"""Number of examples: {num_examples}
+Loss function: {loss_function_name}
+Optimizer: {optimizer_name}
+Optimizer args: {optimizer_args}
+Batch size: {batch_size},
+Device: {device},
+Dataloader args: {dataloader_args}
+
+
+"""
+
+    # initializing the torch tensor that will contain the history of the evaluation during training
+    history = torch.empty((num_classes, num_classes), dtype=torch.float32)
+
+    for current_label in data.class_map.values():
+        print(f"Start training label {current_label}.")
+        training_log += f"Start training label {current_label}.\n"
+        current_label_data = data.get_subset_by_label(current_label)
+        dataloader = torch.utils.data.DataLoader(current_label_data, batch_size=batch_size, shuffle=False, **dataloader_args)
+        for epoch in range(epoch_number):
+            print(f"\nEpoch: {epoch}.\n")
+            training_log += f"\nEpoch: {epoch}.\n"
+            n_examples = 0
+            for img_mini_batch, label_mini_batch in dataloader:
+                # send the mini-batch to the device memory
+                img_mini_batch = img_mini_batch.to(device)
+                label_mini_batch = label_mini_batch.to(device)
+                
+                logits = model(img_mini_batch)
+                mini_batch_loss = loss_function(logits, label_mini_batch)
+
+                n_examples += batch_size
+
+                # perform the backward step and the optimization step
+                mini_batch_loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+
+                print(f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}")
+                training_log += f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}\n"
+
+        if evaluate:
+            history[current_label] = evaluate_class_by_class(
+                model,
+                experiment.test_set,
+                metrics = "accuracy",
+                device = device,
+                batch_size = batch_size,
+                dataloader_args = dataloader_args
+            )
+
+    print(f"End training.")
+    training_log += f"End training.\n"
+
+    # recover the initial train/eval mode
+    if not training: model.eval()
+
+    output = dict(training_log = training_log, trained_model = model)
+
+    if evaluate:
+        plot1, plot2 = task_incremental_plot(history)
+        output["training_history"] = history
+        output["task_by_task_accuracy"] = plot1
+        output["total_accuracy_by_task"] = plot2
+
+    return output
+
+def classwise_online_train(
+    experiment,
+    loss_function_name="cross_entropy_loss",
+    optimizer_name="adam",
+    optimizer_args={},
     device="cpu",
     batch_size=1,
     dataloader_args=None,
@@ -239,16 +341,14 @@ def classwise_train(
 
     # create the optimizer selected by the caller of the function
     if optimizer_name in optimizers:
-        optimizer = optimizers[optimizer_name](experiment.model.parameters(), lr, weight_decay=weight_decay)
+        optimizer = optimizers[optimizer_name](experiment.model.parameters(), **optimizer_args)
     else:
         raise ValueError(f'Optimizer "{optimizer_name}" not defined.')
     
     training_log = f"""Number of examples: {num_examples}
-Epochs: {epoch_number}
 Loss function: {loss_function_name}
 Optimizer: {optimizer_name}
-Learning rate: {lr}
-Weight decay: {weight_decay}
+Optimizer args: {optimizer_args}
 Batch size: {batch_size},
 Device: {device},
 Dataloader args: {dataloader_args}
@@ -314,7 +414,7 @@ Dataloader args: {dataloader_args}
             batch_size=batch_size,
             dataloader_args=dataloader_args
         )
-        plot = plot(plot=plot, savefig=savefig, **kwargs)
+        plot = plot()
         output["training_history"] = history
         output["evaluation_during_training_plot"] = plot
 
@@ -368,3 +468,30 @@ def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", 
     # return the 1D tensor of accuracies of each class
     return true_positive / total
 
+def task_incremental_plot(history):
+    num_classes = history.shape[0]
+
+    macro_accuracy = history.mean(dim=1)
+    
+    f = plt.figure()
+    ax = f.add_subplot(111)
+    
+    for index, h in enumerate(history.transpose(0, 1)):
+        ax.plot(range(index + 1, num_classes + 1), h[index:])    
+    
+    ax.set_ylim([-0.1, 1.1])
+    ax.set_xticks(range(num_classes + 1))
+    ax.set_xlabel("computed after training class #")
+    ax.set_ylabel("accuracy")
+    ax.set_title("Task-incremental accuracy")
+
+    f_macro = plt.figure()
+    ax = f_macro.add_subplot(111)
+    ax.bar(torch.arange(1, num_classes + 1), macro_accuracy)
+    ax.set_ylim([-0.1, 1.1])
+    ax.set_xticks(range(num_classes + 1))
+    ax.set_xlabel("computed after training class #")
+    ax.set_ylabel("accuracy")
+    ax.set_title("Task-incremental accuracy")
+
+    return f, f_macro

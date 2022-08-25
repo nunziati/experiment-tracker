@@ -131,3 +131,8 @@ class ETDataset(torch.utils.data.Dataset):
         # concatenating the tables of each dataset
         self.data_indexes = torch.cat(data_indexes_list, axis=1).transpose(0, 1)
 
+    def get_subset_by_label(self, label):
+        indices = [idx for idx in range(len(self)) if self[idx][1] == label]
+        
+        return torch.utils.data.Subset(self, indices)
+        # return ETDataset(datasets_list, self, self.input_preprocessing_function, self.output_preprocessing_function)
