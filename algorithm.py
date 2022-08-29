@@ -1,7 +1,9 @@
+from asyncio.format_helpers import _format_callback_source
 import torch
 from collections.abc import Iterable
 import matplotlib.pyplot as plt
 from experiment import ETExperiment
+from math import ceil
 
 loss_functions = dict(
     cross_entropy_loss = torch.nn.CrossEntropyLoss
@@ -289,14 +291,17 @@ Dataloader args: {dataloader_args}
     output = dict(training_log = training_log, trained_model = model)
 
     if evaluate:
-        plot1, plot2 = task_incremental_plot(history)
-        output["training_history"] = history
-        output["task_by_task_accuracy"] = plot1
-        output["total_accuracy_by_task"] = plot2
+        plot1, plot2 = task_incremental_plot(history, range(1, 1 + num_classes))
+        output["training_history"] = str(history)
+        output["training_history_tensor"]
+        output["macro_accuracy"] = str(history.mean(dim=1))
+        output["macro_accuracy_tensor"] = history.mean(dim=1)
+        output["task_by_task_class_accuracy"] = plot1
+        output["task_by_task_total_accuracy"] = plot2
 
     return output
 
-def classwise_online_train(
+def single_pass_online_train(
     experiment,
     loss_function_name="cross_entropy_loss",
     optimizer_name="adam",
@@ -304,7 +309,8 @@ def classwise_online_train(
     device="cpu",
     batch_size=1,
     dataloader_args=None,
-    evaluate=True
+    evaluate=True,
+    evaluation_step="mini_batch"
 ):
     """Train the network using the specified options.
     The training is single-pass, and the evaluation is performed at the end of each class.
@@ -318,12 +324,15 @@ def classwise_online_train(
     """
 
     data = experiment.training_set
+    data.dataset_wise_sort_by_label()
+
+    num_classes = data.num_classes
     
     model = experiment.model.to(torch.device(device))
 
     num_examples = len(data)
 
-    batch_size = num_examples if batch_size == None else batch_size
+    batch_size = 1 if batch_size == None else batch_size
     dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=False, **dataloader_args)
 
     for parameter in model.parameters():
@@ -359,43 +368,66 @@ Dataloader args: {dataloader_args}
     # select the initial label, assuming it to be 0
     current_label = 0
 
+    evaluation_steps = 0
+    if isinstance(evaluation_step, int): evaluation_steps = ceil(len(dataloader) / evaluation_step)
+    elif evaluation_step == "task": evaluation_steps = num_classes
+    elif evaluation_step == "mini_batch": evaluation_steps = len(dataloader)
+    else: raise ValueError(f"evaluation_step = '{evaluation_step}', expected int or str in ['task', 'mini_batch'].")
+
     # initializing the torch tensor that will contain the history of the evaluation during training
-    history = torch.empty((experiment.dataset.num_classes, experiment.dataset.num_classes), dtype=torch.float32)
+    history = torch.empty((evaluation_steps, num_classes), dtype=torch.float32)
+    ticks = torch.empty((evaluation_steps,), dtype=torch.float32)
 
     print(f"Start training.")
     training_log += f"Start training.\n"
     n_examples = 0
-    for img_mini_batch, label_mini_batch in dataloader:
+    current_class = 0
+    current_evaluation_step = 0
+    for mini_batch_idx, (img_mini_batch, label_mini_batch) in enumerate(dataloader):
+        do_evaluation = True if evaluate and (
+            isinstance(evaluation_step, int) and (mini_batch_idx + 1) % evaluation_step == 0 or
+            evaluation_step == "task" and label_mini_batch[-1].item() != current_class or
+            evaluation_step == "mini_batch" or
+            mini_batch_idx == len(dataloader) - 1
+            ) else False
+
         # send the mini-batch to the device memory
         img_mini_batch = img_mini_batch.to(device)
         label_mini_batch = label_mini_batch.to(device)
 
-        mini_batch_loss = torch.zeros((1,), requires_grad=False)
+        logits = model(img_mini_batch)
 
-        # loop over the examples of the current mini-batch
-        for img, label in zip(img_mini_batch, label_mini_batch):
-            # if we passed to another class, evalute the model on the whole test set and save the results
-            if evaluate and label != current_label:
-                history[current_label] = evaluate_class_by_class(experiment.test_set)
-                current_label = label
+        mini_batch_loss = loss_function(logits, label_mini_batch)
 
-            # forward step
-            # compute the output (actually the logist) of the model on the current example
-            logits = model(img.view((1, *img.shape)))
+        n_examples += batch_size
 
-            # compute the loss function
-            loss = loss_function(logits, label.view((1,)))
-            mini_batch_loss += loss
-            n_examples += 1
+        # perform the backward step and the optimization step
+        mini_batch_loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-            # perform the backward step and the optimization step
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-        # print the loss function, once every 100 examples
         print(f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}")
         training_log += f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}\n"
+
+        while do_evaluation:
+            history[current_evaluation_step] = evaluate_class_by_class(
+                model,
+                experiment.test_set,
+                metrics = "accuracy",
+                device = device,
+                batch_size = batch_size,
+                dataloader_args = dataloader_args
+            )
+            
+            ticks[current_evaluation_step] = n_examples
+
+            current_evaluation_step += 1
+
+            if label_mini_batch[-1].item() != current_class:
+                current_class += 1
+
+            if evaluation_step != "task" or label_mini_batch[-1].item() == current_class:
+                do_evaluation = False
     
     print(f"End training.")
     training_log += f"End training.\n"
@@ -406,17 +438,13 @@ Dataloader args: {dataloader_args}
     output = dict(training_log = training_log, trained_model = model)
 
     if evaluate:
-        history[current_label] = evaluate_class_by_class(
-            model,
-            experiment.test_set,
-            metrics="accuracy",
-            device=device,
-            batch_size=batch_size,
-            dataloader_args=dataloader_args
-        )
-        plot = plot()
-        output["training_history"] = history
-        output["evaluation_during_training_plot"] = plot
+        plot1, plot2 = task_incremental_plot(history, ticks)
+        output["training_history"] = str(history)
+        output["training_history_tensor"] = history
+        output["macro_accuracy"] = str(history.mean(dim=1))
+        output["macro_accuracy_tensor"] = history.mean(dim=1)
+        output["step_by_step_class_accuracy"] = plot1
+        output["step_by_step_total_accuracy"] = plot2
 
     return output
 
@@ -468,30 +496,30 @@ def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", 
     # return the 1D tensor of accuracies of each class
     return true_positive / total
 
-def task_incremental_plot(history):
-    num_classes = history.shape[0]
+def task_incremental_plot(history, ticks):
+    num_classes = history.shape[1]
 
     macro_accuracy = history.mean(dim=1)
     
     f = plt.figure()
     ax = f.add_subplot(111)
     
-    for index, h in enumerate(history.transpose(0, 1)):
-        ax.plot(range(index + 1, num_classes + 1), h[index:])    
+    for h in history.transpose(0, 1):
+        ax.plot(ticks, h)
     
     ax.set_ylim([-0.1, 1.1])
-    ax.set_xticks(range(num_classes + 1))
-    ax.set_xlabel("computed after training class #")
+    ax.set_xticks(ticks)
+    ax.set_xlabel("computed after training step #")
     ax.set_ylabel("accuracy")
-    ax.set_title("Task-incremental accuracy")
+    ax.set_title("Class-wise accuracy at different training steps")
 
     f_macro = plt.figure()
     ax = f_macro.add_subplot(111)
-    ax.bar(torch.arange(1, num_classes + 1), macro_accuracy)
+    ax.plot(ticks, macro_accuracy)
     ax.set_ylim([-0.1, 1.1])
-    ax.set_xticks(range(num_classes + 1))
-    ax.set_xlabel("computed after training class #")
+    ax.set_xticks(ticks)
+    ax.set_xlabel("computed after training step #")
     ax.set_ylabel("accuracy")
-    ax.set_title("Task-incremental accuracy")
+    ax.set_title("Total accuracy at different training steps")
 
     return f, f_macro
