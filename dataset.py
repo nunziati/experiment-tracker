@@ -135,6 +135,36 @@ class ETDataset(torch.utils.data.Dataset):
         indices = [idx for idx in range(len(self)) if self[idx][1] == label]
         
         return torch.utils.data.Subset(self, indices)
-        # return ETDataset(datasets_list, self, self.input_preprocessing_function, self.output_preprocessing_function)
 
- 
+
+def get_cifar10_dataset():
+    transform_cifar10 = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+    ])
+
+    train_set_cifar10 = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_cifar10)
+    test_set_cifar10 = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_cifar10)
+
+    training_set = ETDataset(train_set_cifar10)
+
+    test_set = ETDataset(test_set_cifar10)
+
+    return training_set, test_set
+
+
+def get_cifar100_dataset():
+    transform_cifar100 = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5074,0.4867,0.4411),(0.2011,0.1987,0.2025))
+    ])
+
+    train_set_cifar100 = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_cifar100)
+    test_set_cifar100 = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_cifar100)
+
+    training_set = ETDataset(train_set_cifar100)
+
+    test_set = ETDataset(test_set_cifar100)
+
+    return training_set, test_set
+
