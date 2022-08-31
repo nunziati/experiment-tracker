@@ -507,6 +507,13 @@ def task_incremental_plot(history, ticks):
     for h in history.transpose(0, 1):
         ax.plot(ticks, h)
     
+    print(ticks)
+
+    if len(ticks) > 50:
+        ticks = torch.sort(ticks[torch.randperm(len(ticks))][:50])
+
+    print(ticks)
+
     ax.set_ylim([-0.1, 1.1])
     ax.set_xticks(ticks)
     ax.set_xlabel("computed after training step #")

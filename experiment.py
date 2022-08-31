@@ -4,10 +4,6 @@ import os
 import shutil
 from matplotlib.figure import Figure
 
-import model
-import dataset
-import algorithm
-
 class ETExperiment:
     def __init__(
         self,
