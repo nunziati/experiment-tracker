@@ -1,44 +1,32 @@
-import model as md
-from dataset import get_cifar10_dataset
-import algorithm as ta
-import experiment as ex
+from model import Simple_Cifar10_MLP, Simple_Cifar10_MLP_CMM
+from experiment import build_experiment
 
 
-my_model = md.Simple_Cifar10_CNN()
+model = Simple_Cifar10_MLP_CMM(base_m=100, delta=10, hidden_units=100)
 
-my_training_set, my_test_set = get_cifar10_dataset()
-
-training_function_args = dict(
+config = dict(
+    name = "simple_mlp_cmm_1g",
+    model = model,
+    type = "online",
+    dataset = "cifar10",
+    sorted = True,
+    epoch_number=3,
     loss_function_name="cross_entropy_loss",
     optimizer_name="sgd",
     optimizer_args = dict(
         lr=0.001,
         weight_decay=0.0001
     ),
-    batch_size=50,
-    device="cuda:0",
+    batch_size=1,
+    metrics="accuracy",
+    device="cuda:1",
     dataloader_args=dict(
         num_workers=4
     ),
-    evaluation_step=10
+    validation=0.2,
+    evaluation_batch_size=500,
+    evaluation_step=500
 )
 
-my_training_algorithm = ta.ETAlgorithm(ta.single_pass_online_train, training_function_args)
-
-test_function_args = dict(
-    metrics="accuracy",
-    batch_size=None,
-    shuffle=True,
-    device="cuda:0",
-    dataloader_args={"num_workers": 4}
-)
-
-# my_test_algorithm = ta.ETAlgorithm(ta.evaluate, test_function_args)
-
-# my_pipeline = ta.ETPipeline("holdout", [my_training_algorithm, my_test_algorithm])
-
-experiment = ex.ETExperiment("prova_gpu_online_task", my_model, my_training_set, my_test_set, my_training_algorithm)
-
+experiment = build_experiment(config)
 experiment.run()
-
-

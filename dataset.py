@@ -1,6 +1,7 @@
 import torch
 import torchvision
 from torchvision import transforms
+import random
 
 class ETDataset(torch.utils.data.Dataset):
     """Class that implements a dataset that is able to merge more datasets in one in a transparent way."""
@@ -135,6 +136,23 @@ class ETDataset(torch.utils.data.Dataset):
         indices = [idx for idx in range(len(self)) if self[idx][1] == label]
         
         return torch.utils.data.Subset(self, indices)
+
+    def split(self, split_proportions):
+        assert abs(sum(split_proportions) - 1) <= 1e-5, "The splitting proportions should sum to 1."
+
+        split_proportions = [int(x * len(self)) for x in split_proportions]
+        indices = list(range(len(self)))
+        random.shuffle(indices)
+        split_indices = []
+        print(split_proportions)
+
+        for num_examples in split_proportions:
+            split_indices.append(torch.utils.data.Subset(self, indices[-num_examples:]))
+            del indices[-num_examples:]
+
+        return tuple(split_indices)
+        
+
 
 
 def get_cifar10_dataset():

@@ -31,19 +31,19 @@ class MyConv2d(torch.nn.Conv2d):
         super(MyConv2d, self).__init__(in_maps, out_maps, *args, padding=padding, **kwargs)   
 
 
-class Simple_Cifar10_CNN(torch.nn.Module):
+class Simple_Cifar10_MLP(torch.nn.Module):
     def __init__(self):
-        super(Simple_Cifar10_CNN, self).__init__()
+        super(Simple_Cifar10_MLP, self).__init__()
 
         self.model = torch.nn.Sequential(
             torch.nn.Flatten(),
-            torch.nn.Linear(32*32*3, 1000),
+            torch.nn.Linear(32*32*3, 100),
             torch.nn.ReLU(),
             torch.nn.Dropout(p=0.5),
-            torch.nn.Linear(1000, 1000),
+            torch.nn.Linear(100, 100),
             torch.nn.ReLU(),
             torch.nn.Dropout(p=0.5),
-            torch.nn.Linear(1000, 10)
+            torch.nn.Linear(100, 10)
         )
 
     def forward(self, x):
@@ -59,6 +59,36 @@ class Simple_Cifar10_CNN(torch.nn.Module):
     torch.nn.ReLU(),
     torch.nn.Dropout(p=0.5),
     torch.nn.Linear(32*32*6, 32*32*6)
+)"""
+
+class Simple_Cifar10_MLP_CMM(torch.nn.Module):
+    def __init__(self, base_m, delta, hidden_units):
+        super(Simple_Cifar10_MLP_CMM, self).__init__()
+
+        self.model = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            LinearCMM(32*32*3, hidden_units, base_m=base_m, delta=delta),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(p=0.5),
+            LinearCMM(hidden_units, hidden_units, base_m=base_m, delta=delta),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(p=0.5),
+            LinearCMM(hidden_units, 10, base_m=base_m, delta=delta)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+    def description(self):
+        return """torch.nn.Sequential(
+    torch.nn.Flatten(),
+    LinearCMM(32*32*3, 1000),
+    torch.nn.ReLU(),
+    torch.nn.Dropout(p=0.5),
+    LinearCMM(1000, 1000),
+    torch.nn.ReLU(),
+    torch.nn.Dropout(p=0.5),
+    LinearCMM(1000, 10)
 )"""
 
 

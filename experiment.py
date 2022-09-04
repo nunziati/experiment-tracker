@@ -4,6 +4,9 @@ import os
 import shutil
 from matplotlib.figure import Figure
 
+import dataset
+import algorithm
+
 class ETExperiment:
     def __init__(
         self,
@@ -51,7 +54,9 @@ class ETExperiment:
 
     def save_results_recursive(self, results):
         for k, v in results.items():
-            if isinstance(v, str):
+            if v == None:
+                continue
+            elif isinstance(v, str):
                 with open(k + ".txt", "a+") as f: f.write(v)
             elif isinstance(v, Figure):
                 v.savefig(k + ".jpg")
@@ -88,13 +93,44 @@ class ETExperiment:
         os.makedirs(f"experiments/{self.experiment_name}")
         os.chdir(f"experiments/{self.experiment_name}")
 
-        # put it in the pipeline
-        """with open("model_description.txt", "a+") as f:
-            if hasattr(self.model.__class__, "description") and callable(self.model.description):
-                f.write(self.model.description())
-            else:
-                f.write("No description found for the model.")"""
-
         self.results = self.execute_pipeline()
 
+        if hasattr(self.model.__class__, "description") and callable(self.model.description):
+            self.results["model_description"] = self.model.description()
+        else:
+            self.results["model_description"] = "No description found for the model."
+
         self.save_results()
+
+
+def build_experiment(config):
+    name = config["name"]
+    model = config["model"]
+    type = config["type"]
+    dataset_name = config["dataset"]
+
+    assert isinstance(name, str)
+    assert isinstance(model, torch.nn.Module)
+    assert type in ["joint", "task", "online"]
+    assert dataset_name in ["cifar10", "cifar100"]
+
+    predefined_datasets = dict(
+        cifar10 = dataset.get_cifar10_dataset,
+        cifar100 = dataset.get_cifar100_dataset
+    )
+
+    training_set, test_set = predefined_datasets[dataset_name]()
+
+    if type == "joint":
+        training_algorithm = algorithm.ETAlgorithm(algorithm.train, config)
+        test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
+        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
+    elif type == "task":
+        pipeline = algorithm.ETAlgorithm(algorithm.task_incremental_train, config)
+    elif type == "online":
+        pipeline = algorithm.ETAlgorithm(algorithm.single_pass_online_train, config)
+
+    experiment = ETExperiment(name, model, training_set, test_set, pipeline)
+
+    return experiment
+

@@ -1,8 +1,6 @@
-from asyncio.format_helpers import _format_callback_source
 import torch
 from collections.abc import Iterable
 import matplotlib.pyplot as plt
-from experiment import ETExperiment
 from math import ceil
 
 loss_functions = dict(
@@ -38,9 +36,6 @@ class ETPipeline:
         self.name = name
     
     def __call__(self, experiment):
-        if not isinstance(experiment, ETExperiment):
-            raise TypeError("The argument 'experiment' should be an instance of ETExperiment.")
-
         pipeline_results = {self.name: {}}
         for algorithm in self.pipeline:
             pipeline_results[self.name].update(algorithm(experiment))
@@ -56,7 +51,9 @@ def train(
     batch_size=None,
     shuffle=True,
     device="cpu",
-    dataloader_args=None
+    dataloader_args=None,
+    validation=None,
+    **kwargs
 ):
     """Train the network using the specified options.
     The training is single-pass, and the evaluation is performed at the end of each class.
@@ -69,15 +66,25 @@ def train(
 
     data = experiment.training_set
     
+    if validation != None:
+        training_data, validation_data = data.split((1 - validation, validation)) 
+    else:
+        training_data, validation_data = data, None
+    
     model = experiment.model.to(torch.device(device))
 
-    num_examples = len(data)
+    num_examples = len(training_data)
 
     batch_size = num_examples if batch_size == None else batch_size
-    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=shuffle, **dataloader_args)
+    training_dataloader = torch.utils.data.DataLoader(training_data, batch_size=batch_size, shuffle=shuffle, **dataloader_args)
+    validation_dataloader = (
+        torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=shuffle, **dataloader_args)
+        if validation_data != None
+        else None
+    )
 
     for parameter in model.parameters():
-        torch.nn.init.uniform_(parameter, -0.1, 0.1)
+        torch.nn.init.uniform_(parameter, -0.01, 0.01)
         
     # save the train/eval mode of the network and change it to training mode
     training = model.training
@@ -95,7 +102,9 @@ def train(
     else:
         raise ValueError(f'Optimizer "{optimizer_name}" not defined.')
     
-    training_log = f"""Number of examples: {num_examples}
+    training_log = f"""Number of total examples: {len(data)}
+Number of training examples: {num_examples}
+Number of validation examples: {0 if validation == None else len(validation_data)}
 Epochs: {epoch_number}
 Loss function: {loss_function_name}
 Optimizer: {optimizer_name}
@@ -104,15 +113,23 @@ Batch size: {batch_size},
 Shuffle: {shuffle},
 Device: {device},
 Dataloader args: {dataloader_args}
-
+Validation: {0.0 if validation == None else validation * 100:<.2f} % of the training examples
 
 """
+    learning_curve_x = torch.empty((epoch_number * len(training_dataloader),), dtype=torch.float32)
+    learning_curve_y = torch.empty((epoch_number * len(training_dataloader),), dtype=torch.float32)
+    
+    if validation != None:
+        generalization_curve_x = torch.empty((epoch_number,), dtype=torch.float32)
+        generalization_curve_y = torch.empty((epoch_number,), dtype=torch.float32)
 
+    best_loss = None
     for epoch in range(1, 1 + epoch_number):
         print(f"Start epoch {epoch}")
         training_log += f"Start epoch {epoch}\n"
         n_examples = 0
-        for img_mini_batch, label_mini_batch in dataloader:
+        mini_batch_idx = 0
+        for img_mini_batch, label_mini_batch in training_dataloader:
             # send the mini-batch to the device memory
             img_mini_batch = img_mini_batch.to(device)
             label_mini_batch = label_mini_batch.to(device)
@@ -134,21 +151,76 @@ Dataloader args: {dataloader_args}
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-        
+
+            learning_curve_x[(epoch - 1) * len(training_dataloader) + mini_batch_idx] = (epoch - 1) + n_examples / len(training_data)
+            learning_curve_y[(epoch - 1) * len(training_dataloader) + mini_batch_idx] = loss.item()
+
+            mini_batch_idx += 1
+            
+        # recover the initial train/eval mode
+        if not training: model.eval()
+
+        if validation_dataloader != None:
+            # validation
+            with torch.no_grad():
+                loss = torch.zeros((len(validation_dataloader),), device=device)
+                for mini_batch_idx, (img_mini_batch, label_mini_batch) in enumerate(validation_dataloader):
+                    # send the mini-batch to the device memory
+                    img_mini_batch = img_mini_batch.to(device)
+                    label_mini_batch = label_mini_batch.to(device)
+
+                    # forward step
+                    # compute the output (actually the logist) of the model on the current example
+                    logits = model(img_mini_batch)
+
+                    # compute the loss function
+                    loss[mini_batch_idx] = loss_function(logits, label_mini_batch)
+
+                loss = torch.mean(loss)
+
+            if best_loss == None or loss < best_loss:
+                best_loss = loss
+                best_epoch = epoch
+                best_model = model.state_dict()
+
+            print(f"\nEpoch = {epoch}\t\tValidation loss = {loss.item():<.4f}\t\t{'(BEST)' if loss == best_loss else ''}\n")
+            training_log += f"\nEpoch = {epoch}\t\tValidation loss = {loss.item():<.4f}\t\t{'(BEST)' if loss == best_loss else ''}\n\n"
+
+            generalization_curve_x[epoch - 1] = epoch
+            generalization_curve_y[epoch - 1] = loss.item()
+
+        else:
+            best_loss = None
+            best_model = model.state_dict()
+            best_epoch = None
+
         print(f"End epoch {epoch}")
         training_log += f"End epoch {epoch}\n"
 
-    # recover the initial train/eval mode
-    if not training: model.eval()
+    model.load_state_dict(best_model)
 
-    return dict(training_log = training_log, trained_model = model)
+    f = plt.figure()
+    ax = f.add_subplot(111)
+    ax.plot(learning_curve_x[len(training_dataloader):], learning_curve_y[len(training_dataloader):])
+
+    if validation != None:
+        ax.plot(generalization_curve_x, generalization_curve_y)
+
+    return dict(
+        training_log = training_log,
+        trained_model = model,
+        best_epoch = best_epoch,
+        best_validation_loss = best_loss,
+        learning_curve = f    
+    )
 
 def evaluate(experiment,
     metrics="accuracy",
     batch_size=None,
     shuffle=True,
     device="cpu",
-    dataloader_args=None
+    dataloader_args=None,
+    **kwargs
 ):
     data = experiment.test_set
     
@@ -200,8 +272,9 @@ def task_incremental_train(
     optimizer_args={},
     device="cpu",
     batch_size=1,
+    evaluation_batch_size=None,
     dataloader_args=None,
-    evaluate=True
+    **kwargs
 ):
     data = experiment.training_set
     num_classes = data.num_classes
@@ -211,9 +284,10 @@ def task_incremental_train(
     num_examples = len(data)
 
     batch_size = 1 if batch_size == None else batch_size
+    if evaluation_batch_size == None: evaluation_batch_size = batch_size
 
     for parameter in model.parameters():
-        torch.nn.init.uniform_(parameter, -0.1, 0.1)
+        torch.nn.init.uniform_(parameter, -0.01, 0.01)
 
     # save the train/eval mode of the network and change it to training mode
     training = model.training
@@ -272,15 +346,14 @@ Dataloader args: {dataloader_args}
                 print(f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}")
                 training_log += f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}\n"
 
-        if evaluate:
-            history[current_label] = evaluate_class_by_class(
-                model,
-                experiment.test_set,
-                metrics = "accuracy",
-                device = device,
-                batch_size = batch_size,
-                dataloader_args = dataloader_args
-            )
+        history[current_label] = evaluate_class_by_class(
+            model,
+            experiment.test_set,
+            metrics = "accuracy",
+            device = device,
+            batch_size = evaluation_batch_size,
+            dataloader_args = dataloader_args
+        )
 
     print(f"End training.")
     training_log += f"End training.\n"
@@ -290,27 +363,28 @@ Dataloader args: {dataloader_args}
 
     output = dict(training_log = training_log, trained_model = model)
 
-    if evaluate:
-        plot1, plot2 = task_incremental_plot(history, range(1, 1 + num_classes))
-        output["training_history"] = str(history)
-        output["training_history_tensor"]
-        output["macro_accuracy"] = str(history.mean(dim=1))
-        output["macro_accuracy_tensor"] = history.mean(dim=1)
-        output["task_by_task_class_accuracy"] = plot1
-        output["task_by_task_total_accuracy"] = plot2
+    plot1, plot2 = task_incremental_plot(history, range(1, 1 + num_classes), use_ticks=True)
+    output["training_history"] = str(history)
+    output["training_history_tensor"] = history
+    output["macro_accuracy"] = str(history.mean(dim=1))
+    output["macro_accuracy_tensor"] = history.mean(dim=1)
+    output["task_by_task_class_accuracy"] = plot1
+    output["task_by_task_total_accuracy"] = plot2
 
     return output
 
 def single_pass_online_train(
     experiment,
+    sorted=True,
     loss_function_name="cross_entropy_loss",
     optimizer_name="adam",
     optimizer_args={},
     device="cpu",
     batch_size=1,
     dataloader_args=None,
-    evaluate=True,
-    evaluation_step="mini_batch"
+    evaluation_step="mini_batch",
+    evaluation_batch_size=None,
+    **kwargs
 ):
     """Train the network using the specified options.
     The training is single-pass, and the evaluation is performed at the end of each class.
@@ -324,7 +398,7 @@ def single_pass_online_train(
     """
 
     data = experiment.training_set
-    data.dataset_wise_sort_by_label()
+    if sorted: data.dataset_wise_sort_by_label()
 
     num_classes = data.num_classes
     
@@ -333,10 +407,11 @@ def single_pass_online_train(
     num_examples = len(data)
 
     batch_size = 1 if batch_size == None else batch_size
-    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=False, **dataloader_args)
+    if evaluation_batch_size == None: evaluation_batch_size = batch_size
+    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=not sorted, **dataloader_args)
 
     for parameter in model.parameters():
-        torch.nn.init.uniform_(parameter, -0.1, 0.1)
+        torch.nn.init.uniform_(parameter, -0.01, 0.01)
 
     # save the train/eval mode of the network and change it to training mode
     training = model.training
@@ -365,9 +440,6 @@ Dataloader args: {dataloader_args}
 
 """
 
-    # select the initial label, assuming it to be 0
-    current_label = 0
-
     evaluation_steps = 0
     if isinstance(evaluation_step, int): evaluation_steps = ceil(len(dataloader) / evaluation_step)
     elif evaluation_step == "task": evaluation_steps = num_classes
@@ -384,12 +456,12 @@ Dataloader args: {dataloader_args}
     current_class = 0
     current_evaluation_step = 0
     for mini_batch_idx, (img_mini_batch, label_mini_batch) in enumerate(dataloader):
-        do_evaluation = True if evaluate and (
+        do_evaluation = (
             isinstance(evaluation_step, int) and (mini_batch_idx + 1) % evaluation_step == 0 or
             evaluation_step == "task" and label_mini_batch[-1].item() != current_class or
             evaluation_step == "mini_batch" or
             mini_batch_idx == len(dataloader) - 1
-            ) else False
+            )
 
         # send the mini-batch to the device memory
         img_mini_batch = img_mini_batch.to(device)
@@ -415,7 +487,7 @@ Dataloader args: {dataloader_args}
                 experiment.test_set,
                 metrics = "accuracy",
                 device = device,
-                batch_size = batch_size,
+                batch_size = evaluation_batch_size,
                 dataloader_args = dataloader_args
             )
             
@@ -437,14 +509,13 @@ Dataloader args: {dataloader_args}
 
     output = dict(training_log = training_log, trained_model = model)
 
-    if evaluate:
-        plot1, plot2 = task_incremental_plot(history, ticks)
-        output["training_history"] = str(history)
-        output["training_history_tensor"] = history
-        output["macro_accuracy"] = str(history.mean(dim=1))
-        output["macro_accuracy_tensor"] = history.mean(dim=1)
-        output["step_by_step_class_accuracy"] = plot1
-        output["step_by_step_total_accuracy"] = plot2
+    plot1, plot2 = task_incremental_plot(history, ticks)
+    output["training_history"] = str(history)
+    output["training_history_tensor"] = history
+    output["macro_accuracy"] = str(history.mean(dim=1))
+    output["macro_accuracy_tensor"] = history.mean(dim=1)
+    output["step_by_step_class_accuracy"] = plot1
+    output["step_by_step_total_accuracy"] = plot2
 
     return output
 
@@ -496,7 +567,7 @@ def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", 
     # return the 1D tensor of accuracies of each class
     return true_positive / total
 
-def task_incremental_plot(history, ticks):
+def task_incremental_plot(history, ticks, use_ticks=False):
     num_classes = history.shape[1]
 
     macro_accuracy = history.mean(dim=1)
@@ -506,16 +577,9 @@ def task_incremental_plot(history, ticks):
     
     for h in history.transpose(0, 1):
         ax.plot(ticks, h)
-    
-    print(ticks)
-
-    if len(ticks) > 50:
-        ticks = torch.sort(ticks[torch.randperm(len(ticks))][:50])
-
-    print(ticks)
 
     ax.set_ylim([-0.1, 1.1])
-    ax.set_xticks(ticks)
+    if use_ticks: ax.set_xticks(ticks)
     ax.set_xlabel("computed after training step #")
     ax.set_ylabel("accuracy")
     ax.set_title("Class-wise accuracy at different training steps")
