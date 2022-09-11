@@ -1,4 +1,3 @@
-from re import S
 import torch
 from linear_cmm import LinearCMM
 
@@ -31,66 +30,42 @@ class MyConv2d(torch.nn.Conv2d):
         super(MyConv2d, self).__init__(in_maps, out_maps, *args, padding=padding, **kwargs)   
 
 
-class Simple_Cifar10_MLP(torch.nn.Module):
-    def __init__(self):
-        super(Simple_Cifar10_MLP, self).__init__()
+class Simple_MLP(torch.nn.Module):
+    def __init__(self, input_size, hidden_units, num_classes, dropout=0.0, flatten=True, cmm=False, cmm_args={}):
+        super(Simple_MLP, self).__init__()
+        self.input_size = input_size
+        self.hidden_units = hidden_units
+        self.num_classes = num_classes
+        self.dropout = dropout
+        self.flatten = flatten
+        self.cmm = cmm
+        layer_type = LinearCMM if cmm else torch.nn.Linear
+        cmm_args = cmm_args if cmm else {}
+
+        flatten = (torch.nn.Flatten(),) if flatten else ()
 
         self.model = torch.nn.Sequential(
             torch.nn.Flatten(),
-            torch.nn.Linear(32*32*3, 100),
+            layer_type(input_size, hidden_units, **cmm_args),
             torch.nn.ReLU(),
-            torch.nn.Dropout(p=0.5),
-            torch.nn.Linear(100, 100),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(p=0.5),
-            torch.nn.Linear(100, 10)
+            torch.nn.Dropout(p=dropout),
+            layer_type(hidden_units, num_classes, **cmm_args)
         )
 
     def forward(self, x):
         return self.model(x)
 
     def description(self):
-        return """torch.nn.Sequential(
-    torch.nn.Flatten(),
-    torch.nn.Linear(32*32*3, 32*32*6),
-    torch.nn.ReLU(),
-    torch.nn.Dropout(p=0.5),
-    torch.nn.Linear(32*32*6, 32*32*6),
-    torch.nn.ReLU(),
-    torch.nn.Dropout(p=0.5),
-    torch.nn.Linear(32*32*6, 32*32*6)
-)"""
+        layer_type = "LinearCMM" if self.cmm else "torch.nn.Linear"
 
-class Simple_Cifar10_MLP_CMM(torch.nn.Module):
-    def __init__(self, base_m, delta, hidden_units):
-        super(Simple_Cifar10_MLP_CMM, self).__init__()
+        repr = "torch.nn.Flatten()\n" if self.flatten else ""
+        repr += f"{layer_type}({self.input_size}, {self.hidden_units}, {str(self.cmm_args)}),\n"
+        repr += "torch.nn.ReLU(),\n"
+        repr += f"torch.nn.Dropout(p={self.dropout}),\n" if self.dropout != 1 else ""
+        repr += f"{layer_type}({self.hidden_units}, {self.num_classes}, {str(self.cmm_args)})"
 
-        self.model = torch.nn.Sequential(
-            torch.nn.Flatten(),
-            LinearCMM(32*32*3, hidden_units, base_m=base_m, delta=delta),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(p=0.5),
-            LinearCMM(hidden_units, hidden_units, base_m=base_m, delta=delta),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(p=0.5),
-            LinearCMM(hidden_units, 10, base_m=base_m, delta=delta)
-        )
-
-    def forward(self, x):
-        return self.model(x)
-
-    def description(self):
-        return """torch.nn.Sequential(
-    torch.nn.Flatten(),
-    LinearCMM(32*32*3, 1000),
-    torch.nn.ReLU(),
-    torch.nn.Dropout(p=0.5),
-    LinearCMM(1000, 1000),
-    torch.nn.ReLU(),
-    torch.nn.Dropout(p=0.5),
-    LinearCMM(1000, 10)
-)"""
-
+        return f"torch.nn.Sequential(\n{repr}\n)"
+        
 
 class Cifar10_CNN(torch.nn.Module):
     def __init__(self):
