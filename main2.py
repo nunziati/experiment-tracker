@@ -1,15 +1,16 @@
 from model import Simple_MLP
 from experiment import build_experiment
 from itertools import product
+import matplotlib.pyplot as plt
 
 
-"""datasets = ["cifar10", "cifar100", "mnist"]"""
+"""datasets = ["cifar10", "split_cifar100", "split_mnist"]"""
 datasets = ["cifar10"]
 
 hidden_unit_values = [30, 100, 300, 1000, 3000]
-learning_rate_values = [0.1, 0.01, 0.001, 0.0001]
+learning_rate_values = [0.1, 0.01, 0.001, 0.0001, 0.00001]
 optimizer_values = ["adam", "sgd"]
-batch_size_values = [100, 1000]
+batch_size_values = [1, 10, 100]
 
 to_do = list(product(
     hidden_unit_values,
@@ -19,7 +20,7 @@ to_do = list(product(
 ))
 
 results_file = [
-    "experiment_name,dataset_name,hidden_units,learning_rate,optimizer,batch_size,accuracy,best_epoch\n"
+    "experiment_name,dataset_name,hidden_units,learning_rate,optimizer,batch_size,accuracy\n"
 ]
 
 for dataset_name in datasets:
@@ -32,6 +33,12 @@ for dataset_name in datasets:
     elif dataset_name == "mnist":
         input_dim = 28*28
         output_dim = 10
+    elif dataset_name == "split_cifar100":
+        input_dim = 32*32*3
+        output_dim = 100
+    elif dataset_name == "split_mnist":
+        input_dim = 28*28
+        output_dim = 10
 
     for exp_id, exp_param in enumerate(to_do):
         hidden_units = exp_param[0]
@@ -42,13 +49,13 @@ for dataset_name in datasets:
         model = Simple_MLP(input_dim, hidden_units, output_dim, dropout=0.0, output="logits")
 
         config = dict(
-            path = "experiments/joint_mlp_NOcmm/",
-            name = f"obj1_{dataset_name}_exp{str(exp_id).rjust(3, '0')}", # da codificare
+            path = "experiments/online_mlp_NOcmm/",
+            name = f"obj2_{dataset_name}_exp{str(exp_id).rjust(3, '0')}", # da codificare
             model = model,
-            type = "joint",
+            type = "online",
             dataset = dataset_name,
-            sorted = False,
-            epoch_number = 100,
+            sorted = True,
+            epoch_number = 1,
             loss_function_name = "cross_entropy_loss",
             optimizer_name = optimizer,
             optimizer_args = dict(
@@ -57,22 +64,23 @@ for dataset_name in datasets:
             ),
             batch_size = batch_size,
             metrics = "accuracy",
-            device = "cuda:1",
+            device = "cuda:0",
             dataloader_args = dict(
                 num_workers = 4
             ),
             validation = 0.2,
-            evaluation_batch_size = 500,
-            evaluation_step = 500
+            evaluation_batch_size = 100,
+            evaluation_step = "task"
         )
 
         experiment = build_experiment(config)
         experiment.run()
 
         accuracy = experiment.results["holdout"]["accuracy"]
-        best_epoch = experiment.results["holdout"]["best_epoch"]
 
-        results_file.append(f"obj1_{dataset_name}_exp{str(exp_id).rjust(3, '0')},{dataset_name},{hidden_units},{learning_rate},{optimizer},{batch_size},{accuracy},{best_epoch}\n")
+        results_file.append(f"obj1_{dataset_name}_exp{str(exp_id).rjust(3, '0')},{dataset_name},{hidden_units},{learning_rate},{optimizer},{batch_size},{accuracy}\n")
 
-with open("experiments/joint_mlp_NOcmm/results_file.txt", "a+") as f:
+        plt.close("all")
+
+with open("experiments/online_mlp_NOcmm/results_file.txt", "a+") as f:
     f.writelines(results_file)

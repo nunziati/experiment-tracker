@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from math import ceil
 
 loss_functions = dict(
-    cross_entropy_loss = torch.nn.CrossEntropyLoss
+    cross_entropy_loss = torch.nn.CrossEntropyLoss,
+    binary_cross_entropy_loss = torch.nn.BCELoss
 )
 
 optimizers = dict(
@@ -46,6 +47,7 @@ def train(
     experiment,
     epoch_number=1,
     loss_function_name="cross_entropy_loss",
+    loss_function_args={},
     optimizer_name="adam",
     optimizer_args={},
     batch_size=None,
@@ -92,7 +94,7 @@ def train(
 
     # select loss function
     if loss_function_name in loss_functions:
-        loss_function = loss_functions[loss_function_name]()
+        loss_function = loss_functions[loss_function_name](**loss_function_args)
     else:
         raise ValueError(f'Loss function "{loss_function_name}" not defined.')
 
@@ -262,12 +264,13 @@ Dataloader args: {dataloader_args}
     # recover the initial train/eval mode
     if training: model.train()
 
-    return dict(accuracy = accuracy.item())
+    return dict(test_log = test_log, accuracy = accuracy.item())
 
 def task_incremental_train(
     experiment,
     epoch_number=1,
     loss_function_name="cross_entropy_loss",
+    loss_function_args={},
     optimizer_name="adam",
     optimizer_args={},
     device="cpu",
@@ -295,7 +298,7 @@ def task_incremental_train(
 
     # select loss function
     if loss_function_name in loss_functions:
-        loss_function = loss_functions[loss_function_name]()
+        loss_function = loss_functions[loss_function_name](**loss_function_args)
     else:
         raise ValueError(f'Loss function "{loss_function_name}" not defined.')
 
@@ -346,7 +349,7 @@ Dataloader args: {dataloader_args}
                 print(f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}")
                 training_log += f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}\n"
 
-        history[current_label] = evaluate_class_by_class(
+        history[current_label] = evaluate_task_by_task(
             model,
             experiment.test_set,
             metrics = "accuracy",
@@ -377,6 +380,7 @@ def single_pass_online_train(
     experiment,
     sorted=True,
     loss_function_name="cross_entropy_loss",
+    loss_function_args={},
     optimizer_name="adam",
     optimizer_args={},
     device="cpu",
@@ -386,16 +390,6 @@ def single_pass_online_train(
     evaluation_batch_size=None,
     **kwargs
 ):
-    """Train the network using the specified options.
-    The training is single-pass, and the evaluation is performed at the end of each class.
-    Args:
-        data: a dataset or dataloader containg the training data in the form (image, label).
-        test_data: a dataset or dataloader (as the previous one) containing the test data.
-        optimizer: "adam" or "sgd".
-        lr: learning rate.
-        weight_decay: weight multiplying the weight decay regularizaion term.
-        plot: if True, the history is plotted at the end of the training procedure.
-    """
 
     data = experiment.training_set
     if sorted: data.dataset_wise_sort_by_label()
@@ -406,6 +400,9 @@ def single_pass_online_train(
 
     num_examples = len(data)
 
+    tasks = data.tasks
+    num_tasks = len(tasks)
+    
     batch_size = 1 if batch_size == None else batch_size
     if evaluation_batch_size == None: evaluation_batch_size = batch_size
     dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=not sorted, **dataloader_args)
@@ -419,7 +416,7 @@ def single_pass_online_train(
 
     # select loss function
     if loss_function_name in loss_functions:
-        loss_function = loss_functions[loss_function_name]()
+        loss_function = loss_functions[loss_function_name](**loss_function_args)
     else:
         raise ValueError(f'Loss function "{loss_function_name}" not defined.')
 
@@ -442,26 +439,34 @@ Dataloader args: {dataloader_args}
 
     evaluation_steps = 0
     if isinstance(evaluation_step, int): evaluation_steps = ceil(len(dataloader) / evaluation_step)
-    elif evaluation_step == "task": evaluation_steps = num_classes
+    elif evaluation_step == "task": evaluation_steps = num_tasks
     elif evaluation_step == "mini_batch": evaluation_steps = len(dataloader)
     else: raise ValueError(f"evaluation_step = '{evaluation_step}', expected int or str in ['task', 'mini_batch'].")
 
     # initializing the torch tensor that will contain the history of the evaluation during training
-    history = torch.empty((evaluation_steps, num_classes), dtype=torch.float32)
+    class_history = torch.empty((evaluation_steps, num_classes), dtype=torch.float32)
+    
+    if sorted:
+        task_history = torch.empty((evaluation_steps, num_tasks), dtype=torch.float32)
+        past_tasks_accuracy = torch.empty((evaluation_steps), dtype=torch.float32)
+        current_task_accuracy = torch.empty((evaluation_steps), dtype=torch.float32)
+        next_tasks_accuracy = torch.empty((evaluation_steps), dtype=torch.float32)
+    
     ticks = torch.empty((evaluation_steps,), dtype=torch.float32)
 
     print(f"Start training.")
     training_log += f"Start training.\n"
     n_examples = 0
-    current_class = 0
+    if evaluation_step == "task": current_task_idx = 0
     current_evaluation_step = 0
     for mini_batch_idx, (img_mini_batch, label_mini_batch) in enumerate(dataloader):
         do_evaluation = (
             isinstance(evaluation_step, int) and (mini_batch_idx + 1) % evaluation_step == 0 or
-            evaluation_step == "task" and label_mini_batch[-1].item() != current_class or
+            evaluation_step == "task" and label_mini_batch[-1].item() not in tasks[current_task_idx] or
+            evaluation_step == "task" and mini_batch_idx != len(dataloader) - 1 and data[(mini_batch_idx + 1) * batch_size][1] not in tasks[current_task_idx] or
             evaluation_step == "mini_batch" or
             mini_batch_idx == len(dataloader) - 1
-            )
+        )
 
         # send the mini-batch to the device memory
         img_mini_batch = img_mini_batch.to(device)
@@ -470,7 +475,6 @@ Dataloader args: {dataloader_args}
         logits = model(img_mini_batch)
 
         mini_batch_loss = loss_function(logits, label_mini_batch)
-
         n_examples += batch_size
 
         # perform the backward step and the optimization step
@@ -482,23 +486,40 @@ Dataloader args: {dataloader_args}
         training_log += f"Example = {n_examples}\t\tLoss = {mini_batch_loss.item():<.4f}\n"
 
         while do_evaluation:
-            history[current_evaluation_step] = evaluate_class_by_class(
+            evaluation_results = evaluate_task_by_task(
                 model,
                 experiment.test_set,
                 metrics = "accuracy",
                 device = device,
                 batch_size = evaluation_batch_size,
-                dataloader_args = dataloader_args
+                dataloader_args = dataloader_args,
+                current_task = None if evaluation_step != "task" else current_task_idx
             )
-            
+
+            class_history[current_evaluation_step] = evaluation_results["class_history"]
+            if sorted:
+                task_history[current_evaluation_step] = evaluation_results["task_history"]
+                past_tasks_accuracy[current_evaluation_step] = evaluation_results["past_tasks_accuracy"]
+                current_task_accuracy[current_evaluation_step] = evaluation_results["current_task_accuracy"]
+                next_tasks_accuracy[current_evaluation_step] = evaluation_results["next_tasks_accuracy"]
+
             ticks[current_evaluation_step] = n_examples
 
             current_evaluation_step += 1
 
-            if label_mini_batch[-1].item() != current_class:
-                current_class += 1
-
-            if evaluation_step != "task" or label_mini_batch[-1].item() == current_class:
+            if evaluation_step == "task":
+                if (
+                    label_mini_batch[-1].item() not in tasks[current_task_idx] or
+                    mini_batch_idx != len(dataloader) - 1 and data[(mini_batch_idx + 1) * batch_size][1] not in tasks[current_task_idx]
+                ):
+                    current_task_idx += 1
+            else:
+                do_evaluation = False
+            
+            if evaluation_step == "task" and (
+                label_mini_batch[-1].item() in tasks[current_task_idx] or
+                mini_batch_idx != len(dataloader) - 1 and data[(mini_batch_idx + 1) * batch_size][1] in tasks[current_task_idx]
+            ):
                 do_evaluation = False
     
     print(f"End training.")
@@ -509,22 +530,30 @@ Dataloader args: {dataloader_args}
 
     output = dict(training_log = training_log, trained_model = model)
 
-    plot1, plot2 = task_incremental_plot(history, ticks)
-    output["training_history"] = str(history)
-    output["training_history_tensor"] = history
-    output["macro_accuracy"] = str(history.mean(dim=1))
-    output["macro_accuracy_tensor"] = history.mean(dim=1)
+    plot1, plot2 = task_incremental_plot(class_history, ticks)
+    output["training_class_history"] = str(class_history)
+    output["training_class_history_tensor"] = class_history
+    output["class_macro_accuracy"] = str(class_history.mean(dim=1))
+    output["class_macro_accuracy_tensor"] = class_history.mean(dim=1)
     output["step_by_step_class_accuracy"] = plot1
-    output["step_by_step_total_accuracy"] = plot2
+    output["step_by_step_total_accuracy_by_class"] = plot2
+
+    if sorted:
+        plot3, plot4 = task_incremental_plot(task_history, ticks)
+        output["training_task_history"] = str(task_history)
+        output["training_task_history_tensor"] = task_history
+        output["task_macro_accuracy"] = str(task_history.mean(dim=1))
+        output["task_macro_accuracy_tensor"] = task_history.mean(dim=1)
+        output["step_by_step_task_accuracy"] = plot3
+        output["step_by_step_total_accuracy_by_task"] = plot4
+
+        output["past_tasks_accuracy"] = get_plot(ticks, past_tasks_accuracy, "Past tasks accuracy")
+        output["current_task_accuracy"] = get_plot(ticks, current_task_accuracy, "Current task accuracy")
+        output["next_tasks_accuracy"] = get_plot(ticks, next_tasks_accuracy, "Next tasks accuracy")
 
     return output
 
-def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", batch_size=1, dataloader_args=None):
-    """Compute and retrn the accuracy of the classifier on each single class.
-
-    Returns: a torch.Tensor containg the accuracy on each class.
-    """
-    
+def evaluate_task_by_task(model, test_data, metrics="accuracy", device="cpu", batch_size=1, dataloader_args=None, current_task=None):        
     if metrics != "accuracy": raise NotImplementedError
 
     # save the train/eval mode of the network and change it to evaluation mode
@@ -533,10 +562,15 @@ def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", 
 
     # get the targets and the number of classes
     classes = sorted(list(test_data.class_map.values()))
+    if current_task is not None:
+        tasks = test_data.tasks
     
-    # initializing the counters for the class-by-class accuracy
-    true_positive = torch.zeros((test_data.num_classes,)).to(device)
-    total = torch.zeros((test_data.num_classes,)).to(device)
+    # initializing the counters for the metrics
+    class_true_positive = torch.zeros((test_data.num_classes,)).to(device)
+    class_total = torch.zeros((test_data.num_classes,)).to(device)
+    if current_task is not None:
+        task_true_positive = torch.zeros((len(tasks),)).to(device)
+        task_total = torch.zeros((len(tasks),)).to(device)
     
     num_examples = len(test_data)
 
@@ -558,25 +592,63 @@ def evaluate_class_by_class(model, test_data, metrics="accuracy", device="cpu", 
 
             # update the counters
             for class_index, c in enumerate(classes):
-                true_positive[class_index] += torch.sum(torch.logical_and(label==c, output_label==c))
-                total[class_index] += torch.sum(label==c)
+                class_true_positive[class_index] += torch.sum(torch.logical_and(label==c, output_label==c))
+                class_total[class_index] += torch.sum(label==c)
+
+        if current_task is not None:
+            for class_index, c in enumerate(classes):
+                for task_idx, task in enumerate(tasks):
+                    if c in task:
+                        task_true_positive[task_idx] += class_true_positive[class_index]
+                        task_total[task_idx] += class_total[class_index]
+            
+            past_tasks_true_positive = float('nan') if current_task == 0 else torch.sum(task_true_positive[:current_task])
+            past_tasks_total = float('nan') if current_task == 0 else torch.sum(task_total[:current_task])
+            current_task_true_positive = task_true_positive[current_task]
+            current_task_total = task_total[current_task]
+            next_tasks_true_positive = float('nan') if current_task == len(tasks) - 1 else torch.sum(task_true_positive[current_task + 1:])
+            next_tasks_total = float('nan') if current_task == len(tasks) - 1 else torch.sum(task_total[current_task + 1:])
 
     # recover the initial train/eval mode
     if training: model.train()
 
+    evaluation_results = dict(class_history = class_true_positive / class_total)
+
+    if current_task is not None:
+        evaluation_results.update(
+            dict(
+                task_history = task_true_positive / task_total,
+                past_tasks_accuracy = past_tasks_true_positive / past_tasks_total,
+                current_task_accuracy = current_task_true_positive / current_task_total,
+                next_tasks_accuracy = next_tasks_true_positive / next_tasks_total
+            )
+        )
+
     # return the 1D tensor of accuracies of each class
-    return true_positive / total
+    return evaluation_results
+
+def get_plot(x, y, title="TITLE"):
+    f = plt.figure()
+    ax = f.add_subplot(111)
+    marker = "x" if len(x) <= 20 else None
+    ax.plot(x, y, marker=marker)
+    
+    ax.set_ylim([-0.1, 1.1])
+    ax.set_xlabel("computed after training step #")
+    ax.set_ylabel("accuracy")
+    ax.set_title(title)
+
+    return f
 
 def task_incremental_plot(history, ticks, use_ticks=False):
-    num_classes = history.shape[1]
-
+    num_tasks = history.shape[1]
     macro_accuracy = history.mean(dim=1)
     
     f = plt.figure()
     ax = f.add_subplot(111)
-    
+    marker = "x" if len(ticks) <= 20 else None
     for h in history.transpose(0, 1):
-        ax.plot(ticks, h)
+        ax.plot(ticks, h, marker=marker)
 
     ax.set_ylim([-0.1, 1.1])
     if use_ticks: ax.set_xticks(ticks)
@@ -594,3 +666,62 @@ def task_incremental_plot(history, ticks, use_ticks=False):
     ax.set_title("Total accuracy at different training steps")
 
     return f, f_macro
+
+def get_memory_model_parameters(experiment,
+    batch_size=None,
+    shuffle=True,
+    device="cpu",
+    dataloader_args=None,
+    **kwargs
+):
+    data = experiment.test_set
+    
+    model = experiment.model.to(torch.device(device))
+
+    num_examples = len(data)
+
+    batch_size = num_examples if batch_size == None else batch_size
+    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=shuffle, **dataloader_args)
+        
+    # save the train/eval mode of the network and change it to eval mode
+    training = model.training
+    model.eval()
+    
+    def accumulate_in_dict(current, acc={}, reduce="none", accumulate="sum"):
+        if isinstance(current, torch.Tensor) and isinstance(current, torch.Tensor):
+            if reduce == "sum":
+                current = torch.sum(current, 0)
+
+            if accumulate == "sum":
+                acc += current
+        elif isinstance(current, dict) and isinstance(acc, dict):
+            for key in current:
+                if key not in acc:
+                    acc[key] = current[key]
+                else:
+                    acc[key] = accumulate_in_dict(current[key], acc[key], reduce=reduce)
+        else:
+            raise Exception
+
+        return acc
+
+    memory_model_parameters = {}
+    with torch.no_grad():
+        for img_mini_batch, label_mini_batch in dataloader:
+            # send the mini-batch to the device memory
+            img_mini_batch = img_mini_batch.to(device)
+            label_mini_batch = label_mini_batch.to(device)
+
+            # forward step
+            # compute the output (actually the logist) of the model on the current example
+            output = model.compute_extended_output(img_mini_batch)
+            current_parameters = output["memory_model_parameters"]
+            memory_model_parameters = accumulate_in_dict(current_parameters, memory_model_parameters, reduce="sum")
+
+    # recover the initial train/eval mode
+    if training: model.train()
+
+    continual_model_parameters = model.get_continual_model_parameters()
+    memory_model_parameters = accumulate_in_dict(continual_model_parameters, memory_model_parameters)
+
+    return dict(memory_model_parameters = memory_model_parameters)

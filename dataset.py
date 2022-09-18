@@ -2,6 +2,7 @@ import torch
 import torchvision
 from torchvision import transforms
 import random
+from tqdm import tqdm
 
 class ETDataset(torch.utils.data.Dataset):
     """Class that implements a dataset that is able to merge more datasets in one in a transparent way."""
@@ -32,8 +33,8 @@ class ETDataset(torch.utils.data.Dataset):
             n_samples = len(dataset)
 
             # creating the two columns for the considered dataset
-            dataset_index_array = torch.full((1, n_samples), dataset_index, dtype=torch.int64)
-            example_index_array = torch.arange(n_samples, dtype=torch.int64).reshape((1, -1))
+            dataset_index_array = torch.full((1, n_samples), dataset_index, dtype=torch.int32)
+            example_index_array = torch.arange(n_samples, dtype=torch.int32).reshape((1, -1))
 
             # concatenating the two columns
             data_index_array = torch.cat((dataset_index_array, example_index_array))
@@ -117,14 +118,28 @@ class ETDataset(torch.utils.data.Dataset):
 
         self.shuffle()
 
-        data_indexes = []
+        data_indexes_list_of_lists = [[] for x in self.tasks]
 
-        for task in self.tasks:
-            data_indexes.extend(
-                [idx for idx in self.data_indexes if self.get_raw_item(idx)[1] in task]
-            )
+        for idx in tqdm(self.data_indexes):
+            label = self.get_raw_item(idx)[1]
+            for task_idx, task in enumerate(self.tasks):
+                if label in task:
+                    data_indexes_list_of_lists[task_idx].append(idx)
 
-        return data_indexes
+        data_indexes_list = []
+        for x in data_indexes_list_of_lists : 
+            data_indexes_list.extend(x)
+
+        """for task in self.tasks:
+            print(f"Sorting task {task}")
+            data_indexes_list.extend([idx for idx in self.data_indexes if self.get_raw_item(idx)[1] in task])
+"""
+        data_indexes = torch.empty(tuple(self.data_indexes.shape), dtype=torch.int32)
+        
+        for idx in range(len(data_indexes)):
+            data_indexes[idx] = data_indexes_list[idx]
+        
+        self.data_indexes = data_indexes
 
     def get_subset_by_label(self, label):
         indices = [idx for idx in range(len(self)) if self[idx][1] == label]
@@ -155,7 +170,7 @@ def get_dataset(torchvision_dataset, normalization=((), ()), tasks=None, root='.
     training_set = torchvision_dataset(root=root, train=True, download=True, transform=transform)
     test_set = torchvision_dataset(root=root, train=False, download=True, transform=transform)
 
-    return ETDataset(training_set), ETDataset(test_set)
+    return ETDataset(training_set, tasks=tasks), ETDataset(test_set, tasks=tasks)
 
 
 def get_MNIST_dataset(tasks=None, root='./data'):
@@ -190,3 +205,11 @@ def get_splitMNIST_dataset(root='./data'):
 
 def get_splitCIFAR100_dataset(root='./data'):
     return get_CIFAR100_dataset(tasks=[tuple([5 * x + i for i in range(5)]) for x in range(20)], root=root)
+
+predefined_datasets = dict(
+    cifar10 = get_CIFAR10_dataset,
+    cifar100 = get_CIFAR100_dataset,
+    mnist = get_MNIST_dataset,
+    split_cifar100 = get_splitCIFAR100_dataset,
+    split_mnist = get_splitMNIST_dataset
+)

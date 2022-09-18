@@ -14,7 +14,8 @@ class ETExperiment:
         model = None,
         training_set = None,
         test_set = None,
-        pipeline = None
+        pipeline = None,
+        path = "experiments/"
     ):
         if experiment_name == "":
             experiment_name = "experiment_" + str(datetime.now()).replace(" ", "-")[:20]
@@ -24,6 +25,7 @@ class ETExperiment:
         self.training_set = training_set # instance of ETDataset
         self.test_set = test_set # instance of ETDataset
         self.pipeline = pipeline # instance (or sequence of instances) of ETAlgorithm
+        self.path = path
 
     def ready(self):
         return self.model != None and self.training_set != None and self.pipeline != None
@@ -85,13 +87,14 @@ class ETExperiment:
             print("One of [model, trainig_set, algorithm], not properly set: experiment can't start.")
             return
 
-        if os.path.isdir(f"experiments/{self.experiment_name}"):
+        if os.path.isdir(f"{self.path}{self.experiment_name}"):
             selection = input(f"Duplicated experiment name {self.experiment_name}, do you want to overwrite? (y/n) ")
             if selection != "y": return
-            else: shutil.rmtree(f"experiments/{self.experiment_name}")
+            else: shutil.rmtree(f"{self.path}{self.experiment_name}")
         
-        os.makedirs(f"experiments/{self.experiment_name}")
-        os.chdir(f"experiments/{self.experiment_name}")
+        os.makedirs(f"{self.path}{self.experiment_name}")
+        current_dir = os.getcwd()
+        os.chdir(f"{self.path}{self.experiment_name}")
 
         self.results = self.execute_pipeline()
 
@@ -101,6 +104,7 @@ class ETExperiment:
             self.results["model_description"] = "No description found for the model."
 
         self.save_results()
+        os.chdir(current_dir)
 
 
 def build_experiment(config):
@@ -112,25 +116,24 @@ def build_experiment(config):
     assert isinstance(name, str)
     assert isinstance(model, torch.nn.Module)
     assert type in ["joint", "task", "online"]
-    assert dataset_name in ["cifar10", "cifar100"]
+    assert dataset_name in dataset.predefined_datasets
 
-    predefined_datasets = dict(
-        cifar10 = dataset.get_cifar10_dataset,
-        cifar100 = dataset.get_cifar100_dataset
-    )
-
-    training_set, test_set = predefined_datasets[dataset_name]()
+    training_set, test_set = dataset.predefined_datasets[dataset_name]()
 
     if type == "joint":
         training_algorithm = algorithm.ETAlgorithm(algorithm.train, config)
         test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
         pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
     elif type == "task":
-        pipeline = algorithm.ETAlgorithm(algorithm.task_incremental_train, config)
+        training_algorithm = algorithm.ETAlgorithm(algorithm.task_incremental_train, config)
+        test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
+        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
     elif type == "online":
-        pipeline = algorithm.ETAlgorithm(algorithm.single_pass_online_train, config)
+        training_algorithm = algorithm.ETAlgorithm(algorithm.single_pass_online_train, config)
+        test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
+        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
 
-    experiment = ETExperiment(name, model, training_set, test_set, pipeline)
+    experiment = ETExperiment(name, model, training_set, test_set, pipeline, path=config["path"])
 
     return experiment
 
