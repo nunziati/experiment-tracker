@@ -7,6 +7,8 @@ from matplotlib.figure import Figure
 import dataset
 import algorithm
 
+torch.set_printoptions(profile="full")
+
 class ETExperiment:
     def __init__(
         self,
@@ -56,7 +58,7 @@ class ETExperiment:
 
     def save_results_recursive(self, results):
         for k, v in results.items():
-            if v == None:
+            if v is None:
                 continue
             elif isinstance(v, str):
                 with open(k + ".txt", "a+") as f: f.write(v)
@@ -123,15 +125,24 @@ def build_experiment(config):
     if type == "joint":
         training_algorithm = algorithm.ETAlgorithm(algorithm.train, config)
         test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
-        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
+        pipe = [training_algorithm, test_algorithm]
+        if model.cmm:
+            pipe.append(algorithm.ETAlgorithm(algorithm.get_memory_model_parameters, config))
+        pipeline = algorithm.ETPipeline("holdout", pipe)
     elif type == "task":
         training_algorithm = algorithm.ETAlgorithm(algorithm.task_incremental_train, config)
         test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
-        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
+        pipe = [training_algorithm, test_algorithm]
+        if model.cmm:
+            pipe.append(algorithm.ETAlgorithm(algorithm.get_memory_model_parameters, config))
+        pipeline = algorithm.ETPipeline("holdout", pipe)
     elif type == "online":
         training_algorithm = algorithm.ETAlgorithm(algorithm.single_pass_online_train, config)
         test_algorithm = algorithm.ETAlgorithm(algorithm.evaluate, config)
-        pipeline = algorithm.ETPipeline("holdout", [training_algorithm, test_algorithm])
+        pipe = [training_algorithm, test_algorithm]
+        if model.cmm:
+            pipe.append(algorithm.ETAlgorithm(algorithm.get_memory_model_parameters, config))
+        pipeline = algorithm.ETPipeline("holdout", pipe)
 
     experiment = ETExperiment(name, model, training_set, test_set, pipeline, path=config["path"])
 

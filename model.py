@@ -39,7 +39,7 @@ class Simple_MLP(torch.nn.Module):
         self.cmm = cmm
         self.output = output
         layer_type = LinearCMM if cmm else torch.nn.Linear
-        cmm_args = cmm_args if cmm else {}
+        self.cmm_args = cmm_args if cmm else {}
 
         flatten = (torch.nn.Flatten(),) if flatten else ()
 
@@ -85,12 +85,14 @@ class Simple_MLP(torch.nn.Module):
         )
 
         if self.cmm:
-            output_dict.update(dict(
-                memory_model_parameters = dict(
-                    cmm_params_layer1 = output1["memory_model_parameters"],
-                    cmm_params_layer2 = output2["memory_model_parameters"]
+            output_dict.update(
+                dict(
+                    memory_model_parameters = dict(
+                        cmm_params_layer1 = output1["memory_model_parameters"],
+                        cmm_params_layer2 = output2["memory_model_parameters"]
+                    )
                 )
-            ))
+            )
 
         return output_dict
 

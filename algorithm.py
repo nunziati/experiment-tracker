@@ -18,6 +18,7 @@ class ETAlgorithm:
         self.training_function = training_function
         self.training_function_args = training_function_args
 
+
     def __call__(self, experiment):
         return self.training_function(experiment, **self.training_function_args)
 
@@ -688,18 +689,36 @@ def get_memory_model_parameters(experiment,
     model.eval()
     
     def accumulate_in_dict(current, acc={}, reduce="none", accumulate="sum"):
-        if isinstance(current, torch.Tensor) and isinstance(current, torch.Tensor):
-            if reduce == "sum":
-                current = torch.sum(current, 0)
+        assert reduce in ["none", "sum"]
+        assert accumulate in ["none", "sum"]
 
-            if accumulate == "sum":
-                acc += current
+        if isinstance(current, torch.Tensor):
+            if acc is None:
+                if reduce == "none":
+                    acc = current
+                elif reduce == "sum":
+                    acc = torch.sum(current, 0)
+                    
+            elif isinstance(acc, torch.Tensor):
+                if reduce == "sum":
+                    current = torch.sum(current, 0)
+
+                if accumulate == "sum":
+                    acc += current
+                elif accumulate == "none":
+                    acc = current
+            else:
+                raise Exception
+
         elif isinstance(current, dict) and isinstance(acc, dict):
             for key in current:
                 if key not in acc:
-                    acc[key] = current[key]
-                else:
-                    acc[key] = accumulate_in_dict(current[key], acc[key], reduce=reduce)
+                    acc[key] = {} if isinstance(current[key], dict) else None
+
+                acc[key] = accumulate_in_dict(current[key], acc[key], reduce=reduce, accumulate=accumulate)
+
+                if isinstance(current[key], torch.Tensor) and isinstance(acc[key], torch.Tensor):
+                    acc[key + "_text"] = repr(acc[key])
         else:
             raise Exception
 
@@ -722,6 +741,6 @@ def get_memory_model_parameters(experiment,
     if training: model.train()
 
     continual_model_parameters = model.get_continual_model_parameters()
-    memory_model_parameters = accumulate_in_dict(continual_model_parameters, memory_model_parameters)
+    memory_model_parameters = accumulate_in_dict(continual_model_parameters, memory_model_parameters, accumulate="none")
 
     return dict(memory_model_parameters = memory_model_parameters)

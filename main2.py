@@ -4,23 +4,53 @@ from itertools import product
 import matplotlib.pyplot as plt
 
 
-"""datasets = ["cifar10", "split_cifar100", "split_mnist"]"""
-datasets = ["cifar10"]
-
-hidden_unit_values = [30, 100, 300, 1000, 3000]
-learning_rate_values = [0.1, 0.01, 0.001, 0.0001, 0.00001]
+"""
+datasets = ["cifar10", "split_cifar100", "split_mnist"]
 optimizer_values = ["adam", "sgd"]
+"""
+
+"""
+split_mnist
+sgd
+
+10:     12411.pts-51.maxi
+30:     12119.pts-51.maxi running
+100:    13110.pts-51.maxi running
+300:    13503.pts-51.maxi running
+1000:   14236.pts-51.maxi
+"""
+
+"""
+Start: 14:40
+Target: 240
+"""
+
+datasets = ["split_mnist"]
+optimizer_values = ["sgd"]
+
+path = f"experiments/online_mlp_cmm_{datasets[0]}_{optimizer_values[0]}/"
+
+hidden_unit_values = [10, 30, 100, 300, 1000]
+learning_rate_values = [0.1, 0.01, 0.001, 0.0001, 0.00001]
 batch_size_values = [1, 10, 100]
+memory_units_values = [3, 10, 30, 100]
+delta_values = [0.01, 0.03, 0.1, 0.3]
+
+hidden_unit_values = [100]
+
+path = f"experiments/online_mlp_cmm_{datasets[0]}_{optimizer_values[0]}_hu{hidden_unit_values[0]}/"
 
 to_do = list(product(
     hidden_unit_values,
     learning_rate_values,
     optimizer_values,
-    batch_size_values
+    batch_size_values,
+    memory_units_values,
+    delta_values
 ))
 
 results_file = [
-    "experiment_name,dataset_name,hidden_units,learning_rate,optimizer,batch_size,accuracy\n"
+    "experiment_name,dataset_name,hidden_units,learning_rate,optimizer,batch_size,memory_units,delta,accuracy\n"
 ]
 
 for dataset_name in datasets:
@@ -45,12 +75,16 @@ for dataset_name in datasets:
         learning_rate = exp_param[1]
         optimizer = exp_param[2]
         batch_size = exp_param[3]
+        memory_units = exp_param[4]
+        delta = int(exp_param[5] * (memory_units - 1)) + 1
 
-        model = Simple_MLP(input_dim, hidden_units, output_dim, dropout=0.0, output="logits")
+        cmm_args={'base_m': memory_units, 'delta': delta}
+
+        model = Simple_MLP(input_dim, hidden_units, output_dim, dropout=0.0, output="logits", cmm=True, cmm_args=cmm_args)
 
         config = dict(
-            path = "experiments/online_mlp_NOcmm/",
-            name = f"obj2_{dataset_name}_exp{str(exp_id).rjust(3, '0')}", # da codificare
+            path = path,
+            name = f"exp{str(exp_id).rjust(4, '0')}",
             model = model,
             type = "online",
             dataset = dataset_name,
@@ -78,9 +112,9 @@ for dataset_name in datasets:
 
         accuracy = experiment.results["holdout"]["accuracy"]
 
-        results_file.append(f"obj1_{dataset_name}_exp{str(exp_id).rjust(3, '0')},{dataset_name},{hidden_units},{learning_rate},{optimizer},{batch_size},{accuracy}\n")
+        results_file.append(f"obj1_{dataset_name}_exp{str(exp_id).rjust(3, '0')},{dataset_name},{hidden_units},{learning_rate},{optimizer},{batch_size},{memory_units},{delta},{accuracy}\n")
 
         plt.close("all")
 
-with open("experiments/online_mlp_NOcmm/results_file.txt", "a+") as f:
+with open(f"{path}results_file.txt", "a+") as f:
     f.writelines(results_file)
