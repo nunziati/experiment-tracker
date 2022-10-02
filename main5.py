@@ -1,4 +1,4 @@
-from model import Simple_MLP
+from model import Simple_MLP, Half_CMM
 from experiment import build_experiment
 from itertools import product
 import matplotlib.pyplot as plt
@@ -10,53 +10,20 @@ datasets = ["cifar10", "split_cifar100", "split_mnist"]
 optimizer_values = ["adam", "sgd"]
 """
 
-"""
-split_mnist
-sgd
-
-10:     12411.pts-51.maxi  finito
-30:     12119.pts-51.maxi  finito
-100:    29008.pts-9.kronos finito
-300:    29377.pts-9.kronos finito
+# running on kronos 55
 
 
-cifar10
-sgd
-
-10:     19970.pts-55.maxi  finito
-30:     20728.pts-55.maxi  finito
-100:    5504.pts-51.kronos finito
-300:    5690.pts-51.kronos finito
+datasets = ["split_mnist"]
+optimizer_values = ["sgd", "adam"]
 
 
-split_cifar100
-sgd
+hidden_unit_values = [30, 100, 300]
+learning_rate_values = [0.01, 0.001, 0.0001, 0.00001]
+batch_size_values = [10, 100]
+memory_units_values = [3, 10, 30]
+delta_values = [0.1, 0.3, 0.5]
 
-10:     20728.pts-55.maxi  finito
-30:     20728.pts-55.maxi  finito
-100:    5690.pts-51.kronos  running
-300:    5690.pts-51.kronos finito
-"""
-
-"""
-Start: 14:40
-Target: 240
-"""
-
-datasets = ["split_cifar100"]
-optimizer_values = ["sgd"]
-
-path = f"experiments/online_mlp_cmm_{datasets[0]}_{optimizer_values[0]}/"
-
-hidden_unit_values = [10, 30, 100, 300, 1000]
-learning_rate_values = [0.1, 0.01, 0.001, 0.0001, 0.00001]
-batch_size_values = [1, 10, 100]
-memory_units_values = [3, 10, 30, 100]
-delta_values = [0.01, 0.03, 0.1, 0.3]
-
-hidden_unit_values = [100]
-
-path = f"experiments/online_mlp_cmm_{datasets[0]}_{optimizer_values[0]}_hu{hidden_unit_values[0]}/"
+path = f"experiments/online_mlp_halfcmm_binaryce_{datasets[0]}/"
 
 to_do = list(product(
     hidden_unit_values,
@@ -104,7 +71,7 @@ for dataset_name in datasets:
         elif batch_size == 100 and memory_units == 100:
             continue
         else:
-            model = Simple_MLP(input_dim, hidden_units, output_dim, dropout=0.0, output="logits", cmm=True, cmm_args=cmm_args)
+            model = Half_CMM(input_dim, hidden_units, output_dim, dropout=0.0, output="logits", cmm=True, cmm_args=cmm_args)
 
             config = dict(
                 path = path,
@@ -114,7 +81,7 @@ for dataset_name in datasets:
                 dataset = dataset_name,
                 sorted = True,
                 epoch_number = 1,
-                loss_function_name = "cross_entropy_loss",
+                loss_function_name = "binary_cross_entropy_loss_with_logits",
                 optimizer_name = optimizer,
                 optimizer_args = dict(
                     lr = learning_rate,

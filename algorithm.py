@@ -5,7 +5,8 @@ from math import ceil
 
 loss_functions = dict(
     cross_entropy_loss = torch.nn.CrossEntropyLoss,
-    binary_cross_entropy_loss = torch.nn.BCELoss
+    binary_cross_entropy_loss = torch.nn.BCELoss,
+    binary_cross_entropy_loss_with_logits = torch.nn.BCEWithLogitsLoss
 )
 
 optimizers = dict(
@@ -474,8 +475,14 @@ Dataloader args: {dataloader_args}
         label_mini_batch = label_mini_batch.to(device)
 
         logits = model(img_mini_batch)
+        
+        # compute the loss function
+        if loss_function_name == "cross_entropy_loss":
+            mini_batch_loss = loss_function(logits, label_mini_batch)
+        else:
+            one_hot_label_mini_batch = torch.nn.functional.one_hot(label_mini_batch, num_classes=num_classes).float()
+            mini_batch_loss = loss_function(logits, one_hot_label_mini_batch)
 
-        mini_batch_loss = loss_function(logits, label_mini_batch)
         n_examples += batch_size
 
         # perform the backward step and the optimization step
@@ -529,8 +536,9 @@ Dataloader args: {dataloader_args}
     # recover the initial train/eval mode
     if not training: model.eval()
 
-    output = dict(training_log = training_log, trained_model = model)
-
+    # output = dict(training_log = training_log, trained_model = model)
+    output = dict(training_log = training_log)
+    
     plot1, plot2 = task_incremental_plot(class_history, ticks)
     output["training_class_history"] = str(class_history)
     output["training_class_history_tensor"] = class_history

@@ -111,6 +111,83 @@ class Simple_MLP(torch.nn.Module):
 
         return f"torch.nn.Sequential({repr}\n)"
         
+class Half_CMM(torch.nn.Module):
+    def __init__(self, input_size, hidden_units, num_classes, dropout=0.0, flatten=True, cmm=False, cmm_args={}, output="logits"):
+        super(Half_CMM, self).__init__()
+        self.input_size = input_size
+        self.hidden_units = hidden_units
+        self.num_classes = num_classes
+        self.dropout = dropout
+        self.flatten = flatten
+        self.cmm = cmm
+        self.output = output
+        layer_type = LinearCMM if cmm else torch.nn.Linear
+        self.cmm_args = cmm_args if cmm else {}
+
+        flatten = (torch.nn.Flatten(),) if flatten else ()
+
+        self.flatten = torch.nn.Flatten()
+        self.linear1 = layer_type(input_size, hidden_units, **cmm_args)
+        self.relu1 = torch.nn.ReLU()
+        self.dropout = torch.nn.Dropout(p=dropout)
+        self.linear2 = torch.nn.Linear(hidden_units, num_classes)
+        if output == "sigmoid":
+            self.output_layer = torch.nn.Sigmoid()
+        elif output == "softmax":
+            self.output_layer = torch.nn.Softmax()
+
+    def get_continual_model_parameters(self):
+        return dict(
+            cmm_params_layer1 = self.linear1.get_continual_model_parameters()
+        )
+    
+    def compute_extended_output(self, x):
+        O = self.flatten(x)
+        
+        if self.cmm:
+            output1 = self.linear1.compute_extended_output(O)
+            O = self.relu1(output1["output"])
+        else:
+            O = self.linear1(O)
+            O = self.relu1(O)
+        
+        O = self.dropout(O)
+
+        A = self.linear2(O)
+
+        O = A if self.output == "logits" else self.output_layer(A)
+
+        output_dict = dict(
+            logits = A,
+            output = O,
+        )
+
+        if self.cmm:
+            output_dict.update(
+                dict(
+                    memory_model_parameters = dict(
+                        cmm_params_layer1 = output1["memory_model_parameters"]
+                    )
+                )
+            )
+
+        return output_dict
+
+    def forward(self, x):
+        return self.compute_extended_output(x)["output"]
+
+    def description(self):
+        layer_type = "LinearCMM" if self.cmm else "torch.nn.Linear"
+
+        repr = "torch.nn.Flatten()\n" if self.flatten else ""
+        repr += f"{layer_type}({self.input_size}, {self.hidden_units}, {'' if not self.cmm else str(self.cmm_args)}),\n"
+        repr += "torch.nn.ReLU(),\n"
+        repr += f"torch.nn.Dropout(p={self.dropout}),\n" if self.dropout != 1 else ""
+        repr += f"torch.nn.Linear({self.hidden_units}, {self.num_classes}),\n"
+        repr += f"torch.nn.Sigmoid(),\n" if self.output == "sigmoid" else f"torch.nn.Softmax(),\n" if self.output == "softmax" else ""
+
+        return f"torch.nn.Sequential({repr}\n)"
+        
 
 class Cifar10_CNN(torch.nn.Module):
     def __init__(self):
