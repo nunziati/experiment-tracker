@@ -13,7 +13,7 @@ optimizer_values = ["adam", "sgd"]
 # running on kronos 56
 
 
-datasets = ["split_cifar100"]
+datasets = ["cifar10"]
 optimizer_values = ["sgd", "adam"]
 
 
@@ -24,7 +24,7 @@ memory_units_values = [3, 10, 30]
 delta_values = [0.1, 0.3, 0.5]
 run = [0, 1, 2]
 
-path = f"experiments/online_mlp_halfcmm_repeated_{datasets[0]}/"
+path = f"experiments/online_mlp_headcmm_repeated_{datasets[0]}/"
 
 to_do = list(product(
     hidden_unit_values,
@@ -91,7 +91,7 @@ for dataset_name in datasets:
                 ),
                 batch_size = batch_size,
                 metrics = "accuracy",
-                device = "cuda:1",
+                device = "cpu",
                 dataloader_args = dict(
                     num_workers = 4
                 ),
