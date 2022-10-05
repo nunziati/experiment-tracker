@@ -470,18 +470,33 @@ Dataloader args: {dataloader_args}
             mini_batch_idx == len(dataloader) - 1
         )
 
-        # send the mini-batch to the device memory
-        img_mini_batch = img_mini_batch.to(device)
-        label_mini_batch = label_mini_batch.to(device)
+        mini_batch_part_size = 10
 
-        logits = model(img_mini_batch)
-        
-        # compute the loss function
-        if loss_function_name == "cross_entropy_loss":
-            mini_batch_loss = loss_function(logits, label_mini_batch)
-        else:
-            one_hot_label_mini_batch = torch.nn.functional.one_hot(label_mini_batch, num_classes=num_classes).float()
-            mini_batch_loss = loss_function(logits, one_hot_label_mini_batch)
+        mini_batch_parts = ceil(img_mini_batch.shape[0] / mini_batch_part_size)
+
+        for mini_batch_part_idx in range(mini_batch_parts):
+            img_mini_batch_part = img_mini_batch[mini_batch_part_idx * mini_batch_part_size:(mini_batch_part_idx + 1) * mini_batch_part_size]
+            label_mini_batch_part = label_mini_batch[mini_batch_part_idx * mini_batch_part_size:(mini_batch_part_idx + 1) * mini_batch_part_size]
+            
+            # send the mini-batch part to the device memory
+            img_mini_batch_part = img_mini_batch_part.to(device)
+            label_mini_batch_part = label_mini_batch_part.to(device)
+
+            logits = model(img_mini_batch_part)
+            
+            # compute the loss function
+            if mini_batch_part_idx == 0:
+                if loss_function_name == "cross_entropy_loss":
+                    mini_batch_loss = loss_function(logits, label_mini_batch_part)
+                else:
+                    one_hot_label_mini_batch_part = torch.nn.functional.one_hot(label_mini_batch_part, num_classes=num_classes).float()
+                    mini_batch_loss = loss_function(logits, one_hot_label_mini_batch_part)
+            else:
+                if loss_function_name == "cross_entropy_loss":
+                    mini_batch_loss += loss_function(logits, label_mini_batch_part)
+                else:
+                    one_hot_label_mini_batch_part = torch.nn.functional.one_hot(label_mini_batch_part, num_classes=num_classes).float()
+                    mini_batch_loss += loss_function(logits, one_hot_label_mini_batch_part)
 
         n_examples += batch_size
 
