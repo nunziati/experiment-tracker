@@ -2,7 +2,7 @@ import torch
 import pandas as pd
 from tqdm import tqdm
 
-path = f"experiments/online_mlp_headcmm_repeated_split_mnist"
+path = f"experiments/online_mlp_true_headcmm_repeated_cifar10"
 
 results = pd.read_csv(f"{path}/results_file.txt")
 

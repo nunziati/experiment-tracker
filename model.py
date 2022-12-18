@@ -205,10 +205,10 @@ class Head_CMM(torch.nn.Module):
         flatten = (torch.nn.Flatten(),) if flatten else ()
 
         self.flatten = torch.nn.Flatten()
-        self.linear1 = torch.nn.Linear(hidden_units, num_classes)
+        self.linear1 = torch.nn.Linear(input_size, hidden_units)
         self.relu1 = torch.nn.ReLU()
         self.dropout = torch.nn.Dropout(p=dropout)
-        self.linear2 = layer_type(input_size, hidden_units, **cmm_args)
+        self.linear2 = layer_type(hidden_units, num_classes, **cmm_args)
         if output == "sigmoid":
             self.output_layer = torch.nn.Sigmoid()
         elif output == "softmax":

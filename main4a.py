@@ -11,8 +11,8 @@ optimizer_values = ["adam", "sgd"]
 """
 
 # running on kronos 56
-
-
+flag = False
+checkpoints = [0, 216]
 datasets = ["cifar10"]
 optimizer_values = ["sgd", "adam"]
 
@@ -57,7 +57,19 @@ for dataset_name in datasets:
         input_dim = 28*28
         output_dim = 10
 
+    checkpoint_counter = 0
+
     for exp_id, exp_param in enumerate(to_do):
+        if not flag:
+            if exp_id < checkpoints[checkpoint_counter]: continue
+            if os.path.isdir(f"{path}exp{str(exp_id).rjust(4, '0')}"):
+                checkpoint_counter = checkpoint_counter + 1
+                continue
+        else:
+            if os.path.isdir(f"{path}exp{str(exp_id).rjust(4, '0')}"):
+                break
+
+        flag = True
         hidden_units = exp_param[0]
         learning_rate = exp_param[1]
         optimizer = exp_param[2]
@@ -67,10 +79,7 @@ for dataset_name in datasets:
 
         cmm_args={'base_m': memory_units, 'delta': delta}
 
-        if os.path.isdir(f"{path}exp{str(exp_id).rjust(4, '0')}") and os.path.isfile(f"{path}exp{str(exp_id).rjust(4, '0')}/results/holdout/accuracy.txt"):
-            with open(f"{path}exp{str(exp_id).rjust(4, '0')}/results/holdout/accuracy.txt", "r") as f:
-                accuracy = f.read()
-        elif batch_size == 100 and memory_units == 100:
+        if batch_size == 100 and memory_units == 100:
             continue
         else:
             model = Head_CMM(input_dim, hidden_units, output_dim, dropout=0.0, output="logits", cmm=True, cmm_args=cmm_args)
@@ -109,5 +118,5 @@ for dataset_name in datasets:
 
         plt.close("all")
 
-with open(f"{path}results_file.txt", "a+") as f:
-    f.writelines(results_file)
+# with open(f"{path}results_file.txt", "a+") as f:
+#    f.writelines(results_file)
